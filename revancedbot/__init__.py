@@ -57,7 +57,7 @@ class ApkpureFetcher():
 class Patcher():
     def __init__(self, tool_location: Path =None):
         if tool_location is None:
-            tool_location = Path(tempfile.mkdtemp()).parent / "revancedbot"
+            tool_location = Path(tempfile.mkdtemp())
         self.tool_location = tool_location
         self._started = None
     
@@ -110,7 +110,9 @@ class Patcher():
                 yield PatchJob(package_id=package_id, package_version=None if version == 'Any' else version)
 
 class App:
-    def __init__(self, root=Path("/tmp/revancedbot"), lowlimit=False):
+    def __init__(self, root=None, lowlimit=False):
+        if root is None:
+            root = Path(tempfile.mkdtemp())
         self.root = root
         self.patcher = Patcher(root/"patcher")
         self.lowlimit = lowlimit

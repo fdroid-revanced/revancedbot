@@ -1,0 +1,1 @@
+- 2024-10-24: [Predictable Temporary Directory: Avoid hardcoded paths in /tmp, use tempfile.mkdtemp()]
