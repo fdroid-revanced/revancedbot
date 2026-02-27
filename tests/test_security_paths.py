@@ -2,6 +2,7 @@
 import sys
 import unittest
 import shutil
+import tempfile
 from pathlib import Path
 from revancedbot import App, Patcher
 
@@ -48,6 +49,23 @@ class TestSecurityPaths(unittest.TestCase):
         # The old path was something like /tmp/tmpXXXXXX/revancedbot
         # We just want to ensure it is created securely.
         # checking if it is a directory is enough combined with uniqueness check
+
+    def test_app_respects_env_var(self):
+        """Test that App() respects REVANCED_ROOT environment variable."""
+        import os
+        custom_root = Path(tempfile.mkdtemp())
+        self.dirs_to_cleanup.append(custom_root)
+
+        # We must clean it up because App might try to create it if it doesn't exist
+        # but here we pre-created it to get a path.
+        # Actually App creates it if missing.
+
+        os.environ["REVANCED_ROOT"] = str(custom_root)
+        try:
+            app = App()
+            self.assertEqual(app.root, custom_root)
+        finally:
+            del os.environ["REVANCED_ROOT"]
 
 if __name__ == '__main__':
     unittest.main()

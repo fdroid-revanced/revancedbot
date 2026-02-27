@@ -1,5 +1,6 @@
 import logging
 import sys
+import os
 import tempfile
 from pathlib import Path
 import time
@@ -112,7 +113,12 @@ class Patcher():
 class App:
     def __init__(self, root=None, lowlimit=False):
         if root is None:
-            root = Path(tempfile.mkdtemp())
+            root_env = os.environ.get("REVANCED_ROOT")
+            if root_env:
+                root = Path(root_env)
+                root.mkdir(parents=True, exist_ok=True)
+            else:
+                root = Path(tempfile.mkdtemp())
         self.root = root
         self.patcher = Patcher(root/"patcher")
         self.lowlimit = lowlimit
