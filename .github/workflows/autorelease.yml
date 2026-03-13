@@ -1,0 +1,66 @@
+name: Autorelease
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+jobs:
+  autorelease:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: Setup mise
+        uses: jdx/mise-action@v3
+
+      - name: Setup Chrome Driver
+        uses: nanasess/setup-chromedriver@v2
+
+      - name: Install dependencies
+        run: mise run install
+
+      - name: Run Codegen
+        run: mise run codegen
+
+      - name: Create PR if differences exist
+        id: check_diff
+        run: |
+          if ! git diff --quiet; then
+            echo "changes=true" >> "$GITHUB_OUTPUT"
+            git config --global user.name 'github-actions[bot]'
+            git config --global user.email 'github-actions[bot]@users.noreply.github.com'
+            git checkout -b update-codegen-${{ github.sha }}
+            git add -A
+            git commit -m "chore: update generated code"
+            git push origin update-codegen-${{ github.sha }}
+            gh pr create --title "chore: update generated code" --body "Update generated code" --head "update-codegen-${{ github.sha }}" --base "main" || true
+          fi
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Run CI
+        run: mise run ci
+
+      - name: Create Release
+        if: github.event_name == 'workflow_dispatch'
+        run: |
+          TAG="v$(date +'%Y.%m.%d.%H%M%S')"
+          gh release create "$TAG" --title "Release $TAG" --notes "Release triggered by workflow_dispatch"
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Prepare Artifacts
+        if: github.event_name == 'workflow_dispatch'
+        run: |
+          mkdir -p /tmp/RESULT
+          mv /tmp/revancedbot/patched_apks/*.apk /tmp/RESULT || true
+
+      - name: Upload Artifacts
+        if: github.event_name == 'workflow_dispatch'
+        uses: actions/upload-artifact@v4
+        with:
+          name: patched-apks
+          path: /tmp/RESULT

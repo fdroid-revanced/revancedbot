@@ -1,3 +1,31 @@
 [tools]
-java = "latest"
-uv = "latest"
+java = "26.0.0"
+uv = "0.10.9"
+"ubi:lucasew/workspaced" = "0.2.2"
+
+[tasks.lint]
+run = "workspaced codebase lint"
+
+[tasks.fmt]
+run = "workspaced codebase format"
+
+[tasks.test]
+depends = ["test:*"]
+
+[tasks."test:python"]
+run = "uv run pytest"
+
+[tasks.codegen]
+depends = ["codegen:*"]
+
+[tasks."codegen:patch"]
+run = "uv run --with . repatcher patch-all"
+
+[tasks.install]
+depends = ["install:*"]
+
+[tasks."install:uv"]
+run = "uv sync"
+
+[tasks.ci]
+depends = ["lint", "test"]
