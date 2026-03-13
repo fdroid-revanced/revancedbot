@@ -13,7 +13,7 @@ run = "workspaced codebase format"
 depends = ["test:*"]
 
 [tasks."test:python"]
-run = "uv run pytest"
+run = "uv run pytest || [ $? -eq 5 ]"
 
 [tasks.codegen]
 depends = ["codegen:*"]
