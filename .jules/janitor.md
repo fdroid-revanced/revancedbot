@@ -1,0 +1,1 @@
+- 2026-03-16: Never swallow exceptions with bare except blocks; use the centralized error reporting module.
