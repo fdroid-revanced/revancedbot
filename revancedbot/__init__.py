@@ -8,20 +8,35 @@ from github import Github
 from dataclasses import dataclass
 import subprocess
 from selenium import webdriver
-from selenium.webdriver.common.by import By
 from selenium.webdriver.chrome.options import Options
-from selenium.webdriver.support.ui import WebDriverWait
-from tqdm import tqdm
+
+from revancedbot.errors import report_error
 
 logger = logging.getLogger(__name__)
 
+
 @dataclass
 class PatchJob:
+    """
+    Tracks a patching task for a specific Android package.
+
+    Used throughout the patching pipeline to uniquely identify the target APK
+    and its required version, mapping directly to ReVanced compatible versions.
+    """
+
     package_id: str
-    package_version: Optional[str] # latest if None
+    package_version: Optional[str]  # latest if None
 
 
-class ApkpureFetcher():
+class ApkpureFetcher:
+    """
+    Automates APK downloads from APKPure using a headless Selenium Chrome instance.
+
+    Uses Selenium instead of standard HTTP requests to bypass APKPure's automated
+    bot protection mechanisms. Requires SafeBrowsing to be enabled in Chrome
+    preferences to prevent the browser from blocking file downloads silently.
+    """
+
     def __init__(self, location: Path):
         location.mkdir(parents=True, exist_ok=True)
         self.location = location
@@ -29,10 +44,10 @@ class ApkpureFetcher():
             "download.default_directory": str(location.resolve()),
             "download.prompt_for_download": False,
             "download.directory_upgrade": True,
-            "safebrowsing.enabled": True # without this it blocks because it can't check, anything better? send a PR please!
+            "safebrowsing.enabled": True,  # without this it blocks because it can't check, anything better? send a PR please!
         }
         options = Options()
-        options.add_argument("--headless=new") # for Chrome >= 109
+        options.add_argument("--headless=new")  # for Chrome >= 109
         options.add_argument("--window-size=1920,1080")
         options.add_experimental_option("prefs", prefs)
         self.driver = webdriver.Chrome(options=options)
@@ -54,17 +69,26 @@ class ApkpureFetcher():
         time.sleep(5)
         self.driver.close()
 
-class Patcher():
-    def __init__(self, tool_location: Path =None):
+
+class Patcher:
+    """
+    Manages the lifecycle and execution of ReVanced patching tools (Java CLI and patches).
+
+    Downloads the required `revanced-patches` (.rvp) and `revanced-cli` (.jar)
+    from GitHub releases on demand. Wraps the execution of the Java process,
+    isolating the file management and execution logic from the rest of the application.
+    """
+
+    def __init__(self, tool_location: Path = None):
         if tool_location is None:
             tool_location = Path(tempfile.mkdtemp()).parent / "revancedbot"
         self.tool_location = tool_location
         self._started = None
-    
+
     @property
     def patch_file(self):
         return self.tool_location / "patches.rvp"
-    
+
     @property
     def patcher_file(self):
         return self.tool_location / "patcher.jar"
@@ -75,13 +99,21 @@ class Patcher():
         g = Github()
         self.tool_location.mkdir(parents=True, exist_ok=True)
         if not self.patch_file.exists():
-            latest_patch_release = g.get_repo("ReVanced/revanced-patches").get_latest_release()
-            patch_asset = [p for p in latest_patch_release.assets if p.name.endswith(".rvp")][0]
+            latest_patch_release = g.get_repo(
+                "ReVanced/revanced-patches"
+            ).get_latest_release()
+            patch_asset = [
+                p for p in latest_patch_release.assets if p.name.endswith(".rvp")
+            ][0]
             patch_asset.download_asset(self.patch_file)
 
         if not self.patcher_file.exists():
-            latest_patcher_release = g.get_repo("ReVanced/revanced-cli").get_latest_release()
-            patcher_asset = [p for p in latest_patcher_release.assets if p.name.endswith(".jar")][0]
+            latest_patcher_release = g.get_repo(
+                "ReVanced/revanced-cli"
+            ).get_latest_release()
+            patcher_asset = [
+                p for p in latest_patcher_release.assets if p.name.endswith(".jar")
+            ][0]
             patcher_asset.download_asset(self.patcher_file)
         self._started = True
 
@@ -91,28 +123,46 @@ class Patcher():
             ["java", "-jar", self.patcher_file, *args],
             stdin=stdin,
             stdout=stdout,
-            stderr=stderr
+            stderr=stderr,
         )
-    
+
     @property
     def jobs(self):
-        data = self("list-versions", self.patch_file, stdout=subprocess.PIPE).stdout.decode()
+        data = self(
+            "list-versions", self.patch_file, stdout=subprocess.PIPE
+        ).stdout.decode()
         for package in data.split("Package name: "):
             package_parts = package.split("Most common compatible versions:")
             if len(package_parts) != 2:
                 continue
             package_id = package_parts[0].strip()
             rest = package_parts[1]
-            for version in rest.split('\n'):
-                version = version.strip().split(' ')[0]
-                if version == '':
+            for version in rest.split("\n"):
+                version = version.strip().split(" ")[0]
+                if version == "":
                     continue
-                yield PatchJob(package_id=package_id, package_version=None if version == 'Any' else version)
+                yield PatchJob(
+                    package_id=package_id,
+                    package_version=None if version == "Any" else version,
+                )
+
 
 class App:
+    """
+    Coordinates the entire ReVanced patching pipeline, from discovery to final output.
+
+    Orchestrates the workflow by delegating tasks:
+    1. Discovers compatible apps and versions via the `Patcher` (GitHub ReVanced patches).
+    2. Downloads the required APKs using `ApkpureFetcher`.
+    3. Applies patches locally using the `Patcher` CLI.
+
+    The lowlimit flag exists for testing purposes, restricting the pipeline
+    to process only a small subset of jobs (3) instead of the full catalogue.
+    """
+
     def __init__(self, root=Path("/tmp/revancedbot"), lowlimit=False):
         self.root = root
-        self.patcher = Patcher(root/"patcher")
+        self.patcher = Patcher(root / "patcher")
         self.lowlimit = lowlimit
         self._jobs = None
         self._fetched_apks = None
@@ -133,12 +183,14 @@ class App:
             fetcher = ApkpureFetcher(apk_dir)
             logger.info("Baixando apks...")
             for job in self.jobs:
-                logger.info(f"Baixando {job.package_id}@{job.package_version or "latest"}")
+                logger.info(
+                    f"Baixando {job.package_id}@{job.package_version or 'latest'}"
+                )
                 fetcher.fetch(job)
             fetcher.wait_settle()
             self._fetched_apks = list(apk_dir.iterdir())
         return self._fetched_apks
-    
+
     @property
     def patched_apks(self):
         apk_dir = self.root / "patched_apks"
@@ -146,21 +198,26 @@ class App:
         for fetched_apk in self.fetched_apks:
             try:
                 logger.info(f"Patching {fetched_apk.name}...")
-                self.patcher("patch", fetched_apk, "-o", apk_dir / fetched_apk.name, f"-p={self.patcher.patch_file}")
-            except:
-                pass
+                self.patcher(
+                    "patch",
+                    fetched_apk,
+                    "-o",
+                    apk_dir / fetched_apk.name,
+                    f"-p={self.patcher.patch_file}",
+                )
+            except Exception as e:
+                report_error(e, message=f"Failed to patch APK: {fetched_apk.name}")
 
-    
 
 def run_patcher():
     logging.basicConfig(level=logging.DEBUG)
     a = App()
-    if sys.argv[1] == 'jobs':
+    if sys.argv[1] == "jobs":
         for item in a.jobs:
             print(item, item.apkpure_url)
-    elif sys.argv[1] == 'fetch':
+    elif sys.argv[1] == "fetch":
         print(a.fetched_apks)
-    elif sys.argv[1] == 'patch-all':
+    elif sys.argv[1] == "patch-all":
         print(a.patched_apks)
     else:
         a.patcher(*sys.argv[1:])
