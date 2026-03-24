@@ -1,0 +1,1 @@
+- 2026-03-24: [Medium] Swallowed exceptions mask critical bugs and upstream errors; always log and use a centralized error handler.
