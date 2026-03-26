@@ -1,3 +1,7 @@
 [tools]
-java = "latest"
-uv = "latest"
+java = "21.0.2"
+uv = "0.4.15"
+
+[tasks]
+ci = "uv run pytest"
+test = "uv run pytest"
