@@ -8,42 +8,79 @@ from github import Github
 from dataclasses import dataclass
 import subprocess
 from selenium import webdriver
-from selenium.webdriver.common.by import By
 from selenium.webdriver.chrome.options import Options
-from selenium.webdriver.support.ui import WebDriverWait
-from tqdm import tqdm
+from revancedbot.errors import report_error
 
 logger = logging.getLogger(__name__)
 
+
 @dataclass
 class PatchJob:
+    """Represents a request to patch a specific Android application package.
+
+    This abstraction encapsulates the minimal viable inputs needed for a ReVanced patch
+    run, isolating the patching intent from the actual download or patching execution.
+    A job acts as a transport container for what needs to be patched.
+    """
+
     package_id: str
-    package_version: Optional[str] # latest if None
+    package_version: Optional[str]  # latest if None
 
 
-class ApkpureFetcher():
+class ApkpureFetcher:
+    """Handles the downloading of APK files from APKPure using a headless browser.
+
+    Since APKPure uses Javascript heavily to protect its download links and perform
+    various browser checks, we use Selenium to simulate a real user's browser, bypassing
+    bot protection mechanisms that standard HTTP requests would fail against.
+    """
+
     def __init__(self, location: Path):
+        """Initializes the browser automation environment for downloading APKs.
+
+        Sets up Chrome in headless mode with specific preferences designed to automate
+        downloads without requiring user interaction (e.g., bypassing save-as dialogs
+        and silencing Safe Browsing warnings that otherwise block automated flows).
+        """
         location.mkdir(parents=True, exist_ok=True)
         self.location = location
         prefs = {
             "download.default_directory": str(location.resolve()),
             "download.prompt_for_download": False,
             "download.directory_upgrade": True,
-            "safebrowsing.enabled": True # without this it blocks because it can't check, anything better? send a PR please!
+            "safebrowsing.enabled": True,  # without this it blocks because it can't check, anything better? send a PR please!
         }
         options = Options()
-        options.add_argument("--headless=new") # for Chrome >= 109
+        options.add_argument("--headless=new")  # for Chrome >= 109
         options.add_argument("--window-size=1920,1080")
         options.add_experimental_option("prefs", prefs)
         self.driver = webdriver.Chrome(options=options)
 
     def url_from_job(self, job: PatchJob):
+        """Constructs the direct download endpoint URL for APKPure.
+
+        This URL endpoint triggers the file download automatically when hit
+        by a browser, avoiding the need to parse HTML and simulate clicks on the page.
+        """
         return f"https://d.apkpure.com/b/APK/{job.package_id}?version={job.package_version or 'latest'}"
 
     def fetch(self, job: PatchJob):
+        """Initiates the download of an APK for the specified patch job.
+
+        Instructs the headless browser to navigate to the constructed download URL.
+        Because Chrome is configured to download files automatically to a pre-defined
+        directory, this single request kicks off the background download process.
+        """
         self.driver.get(self.url_from_job(job))
 
     def wait_settle(self):
+        """Blocks execution until all active downloads have completed.
+
+        Polls the target directory for Chrome's temporary download files (`.crdownload`).
+        When these files are absent, it indicates all ongoing file transfers have
+        finished writing to disk. Includes an additional artificial delay to ensure file
+        handles are fully released by the OS before attempting to use the APKs.
+        """
         while True:
             logger.info("Checking if downloads are finished")
             pending = list(self.location.glob("*.crdownload"))
@@ -54,71 +91,140 @@ class ApkpureFetcher():
         time.sleep(5)
         self.driver.close()
 
-class Patcher():
-    def __init__(self, tool_location: Path =None):
+
+class Patcher:
+    """Wrapper around the core ReVanced Java patcher components.
+
+    Downloads necessary `.jar` and `.rvp` tools from GitHub releases if they do not
+    exist locally. It then wraps `subprocess` execution for these components to patch
+    downloaded APKs or extract patching jobs directly from the `.rvp` bundle.
+    """
+
+    def __init__(self, tool_location: Path = None):
+        """Initializes the Patcher's workspace and configurations.
+
+        Defaults to a temporary directory if not provided, ensuring isolated runs
+        where necessary but preferring a defined, reusable directory to cache downloaded
+        assets across executions.
+        """
         if tool_location is None:
             tool_location = Path(tempfile.mkdtemp()).parent / "revancedbot"
         self.tool_location = tool_location
         self._started = None
-    
+
     @property
     def patch_file(self):
+        """Retrieves the expected absolute path to the ReVanced `.rvp` patches bundle."""
         return self.tool_location / "patches.rvp"
-    
+
     @property
     def patcher_file(self):
+        """Retrieves the expected absolute path to the `revanced-cli.jar` executable."""
         return self.tool_location / "patcher.jar"
 
     def _startup(self):
+        """Downloads the required CLI and Patches assets from GitHub if missing.
+
+        This method acts as a lazy initialization mechanism. It dynamically queries
+        the GitHub API for the latest ReVanced releases and fetches the specific asset
+        files to the configured `tool_location`. Ensures the dependencies exist before
+        performing operations that rely on them.
+        """
         if self._started is not None:
             return
         g = Github()
         self.tool_location.mkdir(parents=True, exist_ok=True)
         if not self.patch_file.exists():
-            latest_patch_release = g.get_repo("ReVanced/revanced-patches").get_latest_release()
-            patch_asset = [p for p in latest_patch_release.assets if p.name.endswith(".rvp")][0]
+            latest_patch_release = g.get_repo(
+                "ReVanced/revanced-patches"
+            ).get_latest_release()
+            patch_asset = [
+                p for p in latest_patch_release.assets if p.name.endswith(".rvp")
+            ][0]
             patch_asset.download_asset(self.patch_file)
 
         if not self.patcher_file.exists():
-            latest_patcher_release = g.get_repo("ReVanced/revanced-cli").get_latest_release()
-            patcher_asset = [p for p in latest_patcher_release.assets if p.name.endswith(".jar")][0]
+            latest_patcher_release = g.get_repo(
+                "ReVanced/revanced-cli"
+            ).get_latest_release()
+            patcher_asset = [
+                p for p in latest_patcher_release.assets if p.name.endswith(".jar")
+            ][0]
             patcher_asset.download_asset(self.patcher_file)
         self._started = True
 
     def __call__(self, *args, stdin=None, stdout=None, stderr=None):
+        """A pass-through executor for the `patcher.jar` command-line utility.
+
+        Automatically triggers dependency verification (`_startup`) and invokes `java -jar`
+        to execute the downloaded ReVanced CLI with any arbitrary arguments passed down.
+        """
         self._startup()
         return subprocess.run(
             ["java", "-jar", self.patcher_file, *args],
             stdin=stdin,
             stdout=stdout,
-            stderr=stderr
+            stderr=stderr,
         )
-    
+
     @property
     def jobs(self):
-        data = self("list-versions", self.patch_file, stdout=subprocess.PIPE).stdout.decode()
+        """Discovers and parses all available patching jobs bundled inside the patches file.
+
+        Executes `patcher.jar list-versions` against the `patches.rvp` and parses
+        its standard output, transforming raw string blocks of packages and versions into
+        structured `PatchJob` objects. This allows dynamic discovery of what can be
+        patched without hardcoding package IDs.
+        """
+        data = self(
+            "list-versions", self.patch_file, stdout=subprocess.PIPE
+        ).stdout.decode()
         for package in data.split("Package name: "):
             package_parts = package.split("Most common compatible versions:")
             if len(package_parts) != 2:
                 continue
             package_id = package_parts[0].strip()
             rest = package_parts[1]
-            for version in rest.split('\n'):
-                version = version.strip().split(' ')[0]
-                if version == '':
+            for version in rest.split("\n"):
+                version = version.strip().split(" ")[0]
+                if version == "":
                     continue
-                yield PatchJob(package_id=package_id, package_version=None if version == 'Any' else version)
+                yield PatchJob(
+                    package_id=package_id,
+                    package_version=None if version == "Any" else version,
+                )
+
 
 class App:
+    """The central orchestrator for the patching lifecycle.
+
+    Connects the discovery (`Patcher.jobs`), retrieval (`ApkpureFetcher`), and execution
+    phases. It manages a persistent root directory where tools, downloaded APKs, and
+    patched outputs are stored.
+    """
+
     def __init__(self, root=Path("/tmp/revancedbot"), lowlimit=False):
+        """Configures the main application orchestration pipeline.
+
+        Initializes dependencies including the `Patcher` inside the specified root.
+        The `lowlimit` flag allows overriding the execution constraints, predominantly
+        used for testing or constraining bandwidth by limiting the number of jobs
+        processed per run.
+        """
         self.root = root
-        self.patcher = Patcher(root/"patcher")
+        self.patcher = Patcher(root / "patcher")
         self.lowlimit = lowlimit
         self._jobs = None
         self._fetched_apks = None
 
     @property
     def jobs(self):
+        """Retrieves and caches the list of available patch jobs.
+
+        Caches the result to avoid re-parsing the CLI output on subsequent calls.
+        If `lowlimit` was enabled during `App` initialization, it aggressively slices
+        the job queue down to just the first 3 items.
+        """
         if self._jobs is None:
             self._jobs = list(self.patcher.jobs)
         if self.lowlimit:
@@ -127,40 +233,67 @@ class App:
 
     @property
     def fetched_apks(self):
+        """Ensures all required APKs have been downloaded, and retrieves their paths.
+
+        Iterates through the known list of `jobs` and instructs the `ApkpureFetcher`
+        to queue up downloads. It then blocks execution (via `wait_settle`) until
+        the entire batch is fetched to disk successfully. The local cache prevents
+        redownloading items in subsequent calls.
+        """
         apk_dir = self.root / "downloaded_apks"
         apk_dir.mkdir(parents=True, exist_ok=True)
         if self._fetched_apks is None:
             fetcher = ApkpureFetcher(apk_dir)
             logger.info("Baixando apks...")
             for job in self.jobs:
-                logger.info(f"Baixando {job.package_id}@{job.package_version or "latest"}")
+                logger.info(
+                    f"Baixando {job.package_id}@{job.package_version or 'latest'}"
+                )
                 fetcher.fetch(job)
             fetcher.wait_settle()
             self._fetched_apks = list(apk_dir.iterdir())
         return self._fetched_apks
-    
+
     @property
     def patched_apks(self):
+        """Processes all fully-downloaded APKs through the patching engine.
+
+        Iterates over the local `fetched_apks` and executes the `Patcher` on each.
+        This writes output APKs to an isolated `patched_apks` directory. Any exceptions
+        thrown during individual patching operations are caught and routed to the
+        centralized error reporter to avoid halting the entire queue for a single failure.
+        """
         apk_dir = self.root / "patched_apks"
         apk_dir.mkdir(parents=True, exist_ok=True)
         for fetched_apk in self.fetched_apks:
             try:
                 logger.info(f"Patching {fetched_apk.name}...")
-                self.patcher("patch", fetched_apk, "-o", apk_dir / fetched_apk.name, f"-p={self.patcher.patch_file}")
-            except:
-                pass
+                self.patcher(
+                    "patch",
+                    fetched_apk,
+                    "-o",
+                    apk_dir / fetched_apk.name,
+                    f"-p={self.patcher.patch_file}",
+                )
+            except Exception as e:
+                report_error(e)
 
-    
 
 def run_patcher():
+    """Main CLI entrypoint.
+
+    Dispatches command-line arguments to specific lifecycle stages on the `App` instance
+    (e.g., retrieving `jobs`, executing the `fetch` step, or running the full `patch-all`
+    suite). Defaults to passing arbitrary arguments directly through to the `Patcher`.
+    """
     logging.basicConfig(level=logging.DEBUG)
     a = App()
-    if sys.argv[1] == 'jobs':
+    if sys.argv[1] == "jobs":
         for item in a.jobs:
             print(item, item.apkpure_url)
-    elif sys.argv[1] == 'fetch':
+    elif sys.argv[1] == "fetch":
         print(a.fetched_apks)
-    elif sys.argv[1] == 'patch-all':
+    elif sys.argv[1] == "patch-all":
         print(a.patched_apks)
     else:
         a.patcher(*sys.argv[1:])
