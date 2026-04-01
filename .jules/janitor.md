@@ -1,0 +1,1 @@
+- 2024-04-01: Always use centralized error reporting instead of empty except blocks, and ensure notebooks do not contain module-level imports below the first cell.
