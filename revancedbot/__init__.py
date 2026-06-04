@@ -83,7 +83,7 @@ class Patcher:
         self.tool_location.mkdir(parents=True, exist_ok=True)
         if not self.patch_file.exists():
             latest_patch_release = g.get_repo(
-                "ReVanced/revanced-patches"
+                "inotia00/revanced-patches"
             ).get_latest_release()
             patch_asset = [
                 p for p in latest_patch_release.assets if p.name.endswith(".rvp")
@@ -92,7 +92,7 @@ class Patcher:
 
         if not self.patcher_file.exists():
             latest_patcher_release = g.get_repo(
-                "ReVanced/revanced-cli"
+                "inotia00/revanced-cli"
             ).get_latest_release()
             patcher_asset = [
                 p for p in latest_patcher_release.assets if p.name.endswith(".jar")
