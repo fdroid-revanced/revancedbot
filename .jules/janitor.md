@@ -1,0 +1,1 @@
+- 2026-06-04: Fixed unused imports in revancedbot/__init__.py and implemented centralized error reporting.
