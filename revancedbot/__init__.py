@@ -75,9 +75,11 @@ class Patcher:
         return self.tool_location / "patcher.jar"
 
     def _startup(self):
+        import os
+
         if self._started is not None:
             return
-        g = Github()
+        g = Github(os.getenv("GITHUB_TOKEN"))
         self.tool_location.mkdir(parents=True, exist_ok=True)
         if not self.patch_file.exists():
             latest_patch_release = g.get_repo(
