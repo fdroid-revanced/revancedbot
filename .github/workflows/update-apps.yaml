@@ -13,6 +13,8 @@ jobs:
       - uses: nanasess/setup-chromedriver@v2
       - name: Fetch and patch apks
         run: uv run --with . repatcher patch-all
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Make a folder where I put the apks
         run: |
