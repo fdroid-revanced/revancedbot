@@ -9,6 +9,8 @@ from dataclasses import dataclass
 import subprocess
 from selenium import webdriver
 from selenium.webdriver.chrome.options import Options
+from selenium.webdriver.chrome.service import Service as ChromeService
+from webdriver_manager.chrome import ChromeDriverManager
 
 from .errors import report_error
 
@@ -35,7 +37,9 @@ class ApkpureFetcher:
         options.add_argument("--headless=new")  # for Chrome >= 109
         options.add_argument("--window-size=1920,1080")
         options.add_experimental_option("prefs", prefs)
-        self.driver = webdriver.Chrome(options=options)
+        self.driver = webdriver.Chrome(
+            service=ChromeService(ChromeDriverManager().install()), options=options
+        )
 
     def url_from_job(self, job: PatchJob):
         return f"https://d.apkpure.com/b/APK/{job.package_id}?version={job.package_version or 'latest'}"
