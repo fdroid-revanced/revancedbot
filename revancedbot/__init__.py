@@ -8,10 +8,7 @@ from github import Github
 from dataclasses import dataclass
 import subprocess
 from selenium import webdriver
-from selenium.webdriver.common.by import By
 from selenium.webdriver.chrome.options import Options
-from selenium.webdriver.support.ui import WebDriverWait
-from tqdm import tqdm
 
 logger = logging.getLogger(__name__)
 
@@ -147,7 +144,7 @@ class App:
             try:
                 logger.info(f"Patching {fetched_apk.name}...")
                 self.patcher("patch", fetched_apk, "-o", apk_dir / fetched_apk.name, f"-p={self.patcher.patch_file}")
-            except:
+            except Exception:
                 pass
 
     
