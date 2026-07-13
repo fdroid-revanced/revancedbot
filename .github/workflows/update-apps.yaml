@@ -10,7 +10,7 @@ jobs:
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
 
       - uses: jdx/mise-action@6d1e696aa24c1aa1bcc1adea0212707c71ab78a8 # v3
-      - uses: nanasess/setup-chromedriver@v2
+      - uses: nanasess/setup-chromedriver@e913548694400f275b4070efcd90f47dbbc8914c # v3
       - name: Fetch and patch apks
         run: uv run --with . repatcher patch-all
 
