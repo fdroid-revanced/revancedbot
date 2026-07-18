@@ -12,6 +12,12 @@ run = "go build -o bin/revancedbot ./cmd/revancedbot"
 [tasks.test]
 run = "go test ./..."
 
+[tasks."test:e2e"]
+description = "End-to-end pipeline (keytool, fetch ReVanced tools, list-jobs, fdroid scaffold)"
+depends = ["build"]
+# GITHUB_TOKEN improves rate limits; REVANCEDBOT_E2E_STRICT=1 fails soft steps too
+run = "go test -tags=e2e -count=1 -timeout=30m ./e2e/"
+
 [tasks.release]
 description = "Tag with svu and run goreleaser"
 depends = ["test"]

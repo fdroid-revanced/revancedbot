@@ -34,6 +34,7 @@ func Patch(opts PatchOptions) (appliedPatches []string, err error) {
 		opts.InputAPK,
 		"-o", opts.OutputAPK,
 		"-p", opts.PatchesRVP,
+		"-b", // bypass RVP signature/provenance (we fetch unsigned .rvp assets)
 	}
 	if opts.Blob != nil && opts.KeystorePath != "" {
 		// Common ReVanced CLI keystore flags (v4+/v5+ style).

@@ -19,7 +19,9 @@ func ListJobs(javaBin, cliJar, patchesRVP string) ([]Job, error) {
 	if javaBin == "" {
 		javaBin = "java"
 	}
-	cmd := exec.Command(javaBin, "-jar", cliJar, "list-versions", patchesRVP)
+	// ReVanced CLI v5+/v6: patches file is -p, with -b to skip RVP provenance checks
+	// when we only downloaded the .rvp asset (no signature sidecars).
+	cmd := exec.Command(javaBin, "-jar", cliJar, "list-versions", "-p", patchesRVP, "-b")
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr
