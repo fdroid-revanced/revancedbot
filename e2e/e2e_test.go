@@ -26,7 +26,7 @@ import (
 //
 //  1. keytool signing blob (required)
 //  2. fetch ReVanced CLI (required)
-//  3. patches file (GitHub or REVANCEDBOT_PATCHES_FILE)
+//  3. patches file (GitLab tag → GitHub/SF mirror, or REVANCEDBOT_PATCHES_FILE)
 //  4. list-jobs (requires patches)
 //  5. fdroid-init (required)
 //  6. download+patch one package (soft unless REVANCEDBOT_E2E_STRICT)

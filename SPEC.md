@@ -111,7 +111,7 @@ Renovate (or similar) bumps pins via PRs.
 | Piece | Role |
 |-------|------|
 | **Browserless** (or equivalent) GHA **service container** | Headless Chromium; bot only receives CDP/WebSocket URL |
-| **ReVanced CLI `.jar` + patches `.rvp`** | Downloaded by the bot every run — **always latest** |
+| **ReVanced CLI `.jar` + patches `.rvp`** | Downloaded every run — **always latest**. CLI from GitHub; patches tag from **GitLab** ([where-is-revanced-patches](https://github.com/ReVanced/where-is-revanced-patches)), assets from GitHub if available else community mirror |
 
 ### 4.3 Processes the bot execs
 

@@ -30,12 +30,15 @@ E2E env knobs:
 
 | Variable | Meaning |
 |----------|---------|
-| `GITHUB_TOKEN` | GitHub API rate limits |
-| `REVANCEDBOT_PATCHES_FILE` | Local `.rvp` if GitHub blocks `revanced-patches` (DMCA 451) |
-| `REVANCEDBOT_PATCHES_REPO` | Alternate `owner/repo` for patches releases |
+| `GITHUB_TOKEN` | GitHub API rate limits (CLI releases) |
+| `REVANCEDBOT_PATCHES_FILE` | Local `.rvp` path |
+| `REVANCEDBOT_PATCHES_URL` | Direct URL to a `.rvp` |
+| `REVANCEDBOT_PATCHES_REPO` | Alternate GitHub `owner/repo` for patches |
 | `REVANCEDBOT_E2E_PACKAGE` | Force package id for download/patch step |
 | `REVANCEDBOT_E2E_STRICT=1` | Fail soft steps (APKPure / fdroid) instead of skipping |
 
+Patches: GitHub `ReVanced/revanced-patches` is often DMCA-blocked ([where-is-revanced-patches](https://github.com/ReVanced/where-is-revanced-patches)).  
+`fetch-tools` resolves the latest tag from **GitLab** (`gitlab.com/ReVanced/revanced-patches`), tries GitHub assets, then a community SourceForge mirror for the prebuilt `.rvp`.
 Consumer repos pin `revancedbot` from GitHub Releases via mise, provide `revancedbot.yaml`, and deploy the written F-Droid tree themselves.
 
 ## Spec
