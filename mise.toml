@@ -4,6 +4,7 @@ go = "1.25.6"
 java = "temurin-21.0.7+6.0.LTS"
 uv = "0.8.4"
 goreleaser = "2.17.0"
+svu = "3.3.0"
 
 [tasks.build]
 run = "go build -o bin/revancedbot ./cmd/revancedbot"
@@ -12,5 +13,15 @@ run = "go build -o bin/revancedbot ./cmd/revancedbot"
 run = "go test ./..."
 
 [tasks.release]
-description = "Tag is assumed; runs goreleaser"
-run = "goreleaser release --clean"
+description = "Tag with svu and run goreleaser"
+depends = ["test"]
+usage = '''
+arg "<version>" help="New version" {
+  choices "next" "major" "minor" "patch"
+  default "next"
+}
+'''
+run = '''
+git tag $(svu ${usage_version})
+goreleaser release --clean
+'''
