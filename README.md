@@ -14,9 +14,11 @@ mise run build
 bin/revancedbot keys generate
 export REVANCEDBOT_SIGNING='…'
 
-bin/revancedbot fetch-tools --workspace .revancedbot
-bin/revancedbot list-jobs --workspace .revancedbot
-# bin/revancedbot run --workspace .revancedbot
+# F-Droid REPO root contains revancedbot.yaml (authority)
+mkdir -p /tmp/demo-fdroid && cp revancedbot.example.yaml /tmp/demo-fdroid/revancedbot.yaml
+bin/revancedbot fetch-tools /tmp/demo-fdroid --cache /tmp/rvb-cache
+bin/revancedbot list-jobs /tmp/demo-fdroid --cache /tmp/rvb-cache
+# bin/revancedbot run /tmp/demo-fdroid   # --cache defaults to mkdtemp
 ```
 
 ### Tests

@@ -1,5 +1,9 @@
-# Copy to the consumer repo root as revancedbot.yaml
-workspace: .revancedbot
+# Place this file in the F-Droid simple-binary REPO root as revancedbot.yaml.
+# It is the authority; the bot generates config.yml (gitignored) for fdroidserver.
+#
+# Usage:
+#   revancedbot run /path/to/this/repo
+#   revancedbot run /path/to/this/repo --cache /var/tmp/revancedbot-cache
 
 repo_name: ReVanced F-Droid Repo
 repo_url: https://example.invalid/fdroid/repo
@@ -15,6 +19,6 @@ browser:
   cdp_url: ""
 
 pool_io: 4
-pool_cpu: 0        # 0 = GOMAXPROCS / NumCPU
+pool_cpu: 0        # 0 = NumCPU
 pool_internet: 4
 log_level: info
