@@ -2,4 +2,7 @@
 *.egg-info
 build
 .venv
-__pycache__
+__pycache__bin/
+dist/
+.revancedbot/
+*.p12

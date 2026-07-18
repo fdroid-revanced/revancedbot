@@ -1,0 +1,20 @@
+# Copy to the consumer repo root as revancedbot.yaml
+workspace: .revancedbot
+
+repo_name: ReVanced F-Droid Repo
+repo_url: https://example.invalid/fdroid/repo
+repo_description: >
+  ReVanced-patched applications (simple binary repository).
+
+downloaders:
+  - apkpure
+
+browser:
+  # GHA Browserless service example:
+  # cdp_url: ws://localhost:3000
+  cdp_url: ""
+
+pool_io: 4
+pool_cpu: 0        # 0 = GOMAXPROCS / NumCPU
+pool_internet: 4
+log_level: info

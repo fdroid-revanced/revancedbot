@@ -1,3 +1,16 @@
+# Dev toolchain for this repository (pins). Consumer repos pin their own set.
 [tools]
-java = "latest"
-uv = "latest"
+go = "1.25.6"
+java = "temurin-21.0.7+6.0.LTS"
+uv = "0.8.4"
+goreleaser = "2.17.0"
+
+[tasks.build]
+run = "go build -o bin/revancedbot ./cmd/revancedbot"
+
+[tasks.test]
+run = "go test ./..."
+
+[tasks.release]
+description = "Tag is assumed; runs goreleaser"
+run = "goreleaser release --clean"
