@@ -2,6 +2,7 @@ package cli
 
 import (
 	"context"
+	"fmt"
 	"log/slog"
 	"os"
 	"sync"
@@ -15,8 +16,8 @@ import (
 )
 
 var (
-	cfgFile       string
-	workspaceFlag string
+	cfgFile   string
+	cacheFlag string
 
 	sessionMu sync.Mutex
 	session   *taskgroup.Session
@@ -52,8 +53,8 @@ func NewRoot() *cobra.Command {
 		},
 	}
 
-	root.PersistentFlags().StringVar(&cfgFile, "config", "", "config file (default: ./revancedbot.yaml)")
-	root.PersistentFlags().StringVar(&workspaceFlag, "workspace", "", "workspace directory (overrides config)")
+	root.PersistentFlags().StringVar(&cfgFile, "config", "", "override path to revancedbot.yaml (default: REPO/revancedbot.yaml)")
+	root.PersistentFlags().StringVar(&cacheFlag, "cache", "", "cache directory (default: mkdtemp; tools/stock/signing)")
 
 	root.AddCommand(
 		newKeysCmd(),
@@ -64,12 +65,16 @@ func NewRoot() *cobra.Command {
 		newFDroidInitCmd(),
 		newFDroidUpdateCmd(),
 		newRunCmd(),
+		newSmokeCmd(),
 	)
 	return root
 }
 
-func loadApp(cmd *cobra.Command) (*app.App, error) {
-	cfg, err := config.Load(cfgFile, workspaceFlag)
+func loadApp(cmd *cobra.Command, args []string) (*app.App, error) {
+	if len(args) < 1 {
+		return nil, fmt.Errorf("missing REPO path (F-Droid simple-binary root)")
+	}
+	cfg, err := config.LoadFromRepo(args[0], cacheFlag, cfgFile)
 	if err != nil {
 		return nil, err
 	}

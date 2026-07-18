@@ -13,27 +13,34 @@ import (
 	"github.com/lucasew/revancedbot/internal/fdroid"
 	"github.com/lucasew/revancedbot/internal/revanced"
 	"github.com/lucasew/revancedbot/internal/signing"
+	"github.com/lucasew/revancedbot/internal/toolscheck"
 	"github.com/lucasew/revancedbot/internal/workspace"
 	"workspaced/pkg/logging"
 	"workspaced/pkg/taskgroup"
 )
 
-// App wires config + workspace for CLI commands.
+// App wires config + layout for CLI commands.
 type App struct {
 	Cfg  *config.Config
 	WS   *workspace.Layout
 	Blob *signing.Blob
 }
 
+// New builds layout from config (REPO + CACHE).
 func New(cfg *config.Config) (*App, error) {
-	ws := workspace.New(cfg.Workspace)
+	ws, err := workspace.New(cfg.Repo, cfg.Cache)
+	if err != nil {
+		return nil, err
+	}
 	if err := ws.Ensure(); err != nil {
 		return nil, err
 	}
+	// Reflect resolved cache path (including mkdtemp).
+	cfg.Cache = ws.Cache
 	return &App{Cfg: cfg, WS: ws}, nil
 }
 
-// LoadSigning materializes the signing blob from config.
+// LoadSigning materializes the signing blob into CACHE.
 func (a *App) LoadSigning() error {
 	if a.Cfg.SigningBlob == "" {
 		return fmt.Errorf("REVANCEDBOT_SIGNING is required")
@@ -49,17 +56,42 @@ func (a *App) LoadSigning() error {
 	return nil
 }
 
-// FetchTools downloads latest ReVanced CLI + patches.
+// WriteFDroidConfig generates gitignored REPO/config.yml from revancedbot.yaml authority.
+func (a *App) WriteFDroidConfig() error {
+	if a.Blob == nil {
+		return fmt.Errorf("signing not loaded")
+	}
+	if err := fdroid.EnsureLayout(a.WS.Repo); err != nil {
+		return err
+	}
+	return fdroid.WriteConfig(a.WS.FDroidConfig(), fdroid.RepoMeta{
+		Name:        a.Cfg.RepoName,
+		URL:         a.Cfg.RepoURL,
+		Description: a.Cfg.RepoDescription,
+	}, a.WS.KeystorePath, a.Blob)
+}
+
+// FetchTools downloads CLI + patches into CACHE (skips name hits).
 func (a *App) FetchTools(ctx context.Context) error {
 	log := logging.GetLogger(ctx)
-	log.Info("fetching latest ReVanced CLI and patches")
-	return revanced.FetchLatest(ctx, a.Cfg.GitHubToken, a.WS.PatcherJAR(), a.WS.PatchesRVP())
+	cli := a.WS.PatcherJAR()
+	rvp := a.WS.PatchesRVP()
+	if workspace.CacheHit(cli) && workspace.CacheHit(rvp) {
+		log.Info("tools cache hit", "cli", cli, "patches", rvp)
+		return nil
+	}
+	log.Info("fetching ReVanced CLI and patches into cache", "cache", a.WS.Cache)
+	// Always re-fetch both if either missing (simplicity).
+	return revanced.FetchLatest(ctx, a.Cfg.GitHubToken, cli, rvp)
 }
 
 // ListJobs returns patch jobs.
 func (a *App) ListJobs() ([]revanced.Job, error) {
-	if _, err := os.Stat(a.WS.PatcherJAR()); err != nil {
-		return nil, fmt.Errorf("missing CLI jar; run fetch-tools first: %w", err)
+	if !workspace.CacheHit(a.WS.PatcherJAR()) {
+		return nil, fmt.Errorf("missing CLI jar in cache; run fetch-tools first: %s", a.WS.PatcherJAR())
+	}
+	if !workspace.CacheHit(a.WS.PatchesRVP()) {
+		return nil, fmt.Errorf("missing patches in cache; run fetch-tools first: %s", a.WS.PatchesRVP())
 	}
 	return revanced.ListJobs("java", a.WS.PatcherJAR(), a.WS.PatchesRVP())
 }
@@ -80,16 +112,46 @@ func (a *App) ProcessPackage(ctx context.Context, job revanced.Job) error {
 
 	var lastErr error
 	for _, ver := range versions {
-		req := download.Request{PackageID: job.PackageID, Version: ver}
-		log.Info("download attempt", "package", job.PackageID, "version", emptyAsLatest(ver))
-		res, err := download.FetchFirst(ctx, reg, order, req, a.WS.StockAPKs)
-		if err != nil {
-			lastErr = err
-			log.Warn("download failed", "err", err)
-			continue
+		stockPath := a.WS.StockAPKPath(job.PackageID, ver)
+		var res *download.Result
+		if workspace.CacheHit(stockPath) {
+			log.Info("stock cache hit", "path", stockPath)
+			res = &download.Result{Path: stockPath, SourceID: "cache"}
+		} else {
+			log.Info("download attempt", "package", job.PackageID, "version", emptyAsLatest(ver))
+			// Prefer writing to the naive cache path name.
+			got, err := download.FetchFirst(ctx, reg, order, download.Request{
+				PackageID: job.PackageID,
+				Version:   ver,
+			}, a.WS.StockAPKs)
+			if err != nil {
+				lastErr = err
+				log.Warn("download failed", "err", err)
+				continue
+			}
+			// Normalize to stock cache name if downloader used a different name.
+			if got.Path != stockPath {
+				if err := os.Rename(got.Path, stockPath); err != nil {
+					// copy fallback
+					b, rerr := os.ReadFile(got.Path)
+					if rerr != nil {
+						lastErr = rerr
+						continue
+					}
+					if werr := os.WriteFile(stockPath, b, 0o644); werr != nil {
+						lastErr = werr
+						continue
+					}
+					_ = os.Remove(got.Path)
+				}
+				got.Path = stockPath
+			}
+			res = got
 		}
+
 		outName := fmt.Sprintf("%s_%s_revanced.apk", sanitize(job.PackageID), sanitize(emptyAsLatest(ver)))
-		outPath := filepath.Join(a.WS.PatchedAPKs, outName)
+		outPath := filepath.Join(a.WS.Work, outName)
+		_ = os.MkdirAll(a.WS.Work, 0o755)
 		log.Info("patching", "in", res.Path, "out", outPath)
 		patches, err := revanced.Patch(revanced.PatchOptions{
 			CLIJar:                  a.WS.PatcherJAR(),
@@ -105,12 +167,11 @@ func (a *App) ProcessPackage(ctx context.Context, job revanced.Job) error {
 			log.Warn("patch failed", "err", err)
 			continue
 		}
-		// Stage into fdroid tree
 		pubID := job.PackageID + ".revanced"
-		if err := fdroid.StageAPK(a.WS.FDroid, outPath); err != nil {
+		if err := fdroid.StageAPK(a.WS.Repo, outPath); err != nil {
 			return err
 		}
-		if err := fdroid.WritePatchesMetadata(a.WS.FDroid, pubID, patches); err != nil {
+		if err := fdroid.WritePatchesMetadata(a.WS.Repo, pubID, patches); err != nil {
 			return err
 		}
 		log.Info("package ok", "package", job.PackageID, "apk", outPath)
@@ -122,45 +183,27 @@ func (a *App) ProcessPackage(ctx context.Context, job revanced.Job) error {
 	return fmt.Errorf("skip %s: %w", job.PackageID, lastErr)
 }
 
-// EnsureFDroidConfig writes config.yml for fdroidserver.
-func (a *App) EnsureFDroidConfig() error {
+// FDroidUpdate runs fdroid update in REPO.
+func (a *App) FDroidUpdate(createMeta bool) error {
 	if a.Blob == nil {
 		return fmt.Errorf("signing not loaded")
 	}
-	if err := fdroid.EnsureLayout(a.WS.FDroid); err != nil {
-		return err
-	}
-	// Copy keystore into fdroid dir for relative path simplicity
-	ksInFDroid := filepath.Join(a.WS.FDroid, "keystore.p12")
-	bin, err := os.ReadFile(a.WS.KeystorePath)
-	if err != nil {
-		return err
-	}
-	if err := os.WriteFile(ksInFDroid, bin, 0o600); err != nil {
-		return err
-	}
-	return fdroid.WriteConfig(a.WS.FDroidConfig(), fdroid.RepoMeta{
-		Name:        a.Cfg.RepoName,
-		URL:         a.Cfg.RepoURL,
-		Description: a.Cfg.RepoDescription,
-	}, ksInFDroid, a.Blob)
+	return fdroid.Update(a.WS.Repo, a.Blob, createMeta)
 }
 
-// FDroidUpdate runs fdroid update -c.
-func (a *App) FDroidUpdate(createMeta bool) error {
-	return fdroid.Update(a.WS.FDroid, createMeta)
-}
-
-// RunFull executes the full pipeline with taskgroup Isolate per package.
+// RunFull is the kitchen-sink pipeline for REPO.
 func (a *App) RunFull(ctx context.Context) error {
+	if err := toolscheck.Check(toolscheck.DefaultRun()); err != nil {
+		return err
+	}
 	log := logging.GetLogger(ctx)
 	if err := a.LoadSigning(); err != nil {
 		return err
 	}
-	if err := a.FetchTools(ctx); err != nil {
+	if err := a.WriteFDroidConfig(); err != nil {
 		return err
 	}
-	if err := a.EnsureFDroidConfig(); err != nil {
+	if err := a.FetchTools(ctx); err != nil {
 		return err
 	}
 
@@ -168,7 +211,7 @@ func (a *App) RunFull(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	log.Info("jobs loaded", "count", len(jobs))
+	log.Info("jobs loaded", "count", len(jobs), "repo", a.WS.Repo, "cache", a.WS.Cache)
 
 	limits := taskgroup.DefaultLimits()
 	if a.Cfg.PoolIO > 0 {
@@ -182,13 +225,9 @@ func (a *App) RunFull(ctx context.Context) error {
 	if a.Cfg.PoolInternet > 0 {
 		limits.Internet = a.Cfg.PoolInternet
 	}
+	_ = limits // pools applied by existing session; optional re-enter not needed
 
-	// Session should already be entered by CLI; use group from ctx.
-	g := taskgroup.MustFromContext(ctx)
-
-	type item struct {
-		Job revanced.Job
-	}
+	type item struct{ Job revanced.Job }
 	items := make([]item, len(jobs))
 	for i, j := range jobs {
 		items[i] = item{Job: j}
@@ -201,14 +240,11 @@ func (a *App) RunFull(ctx context.Context) error {
 		TaskName: func(_ int, it item) string { return it.Job.PackageID },
 		Fn: func(ctx context.Context, s *taskgroup.Status, it item) error {
 			s.Update(it.Job.PackageID)
-			// Return nil on failure so Map does not abort siblings (skip policy).
-			// Isolate keeps any nested group errors from cancelling the parent session.
 			err := taskgroup.Isolate(ctx, func(ctx context.Context) error {
 				return a.ProcessPackage(ctx, it.Job)
 			})
 			if err != nil {
 				logging.GetLogger(ctx).Warn("skip package", "package", it.Job.PackageID, "err", err)
-				return nil
 			}
 			return nil
 		},
@@ -216,14 +252,60 @@ func (a *App) RunFull(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	_ = g
 
-	log.Info("running fdroid update")
+	log.Info("running fdroid update", "repo", a.WS.Repo)
 	if err := a.FDroidUpdate(true); err != nil {
 		return err
 	}
-	log.Info("done", "fdroid_root", a.WS.FDroid)
+	log.Info("done", "repo", a.WS.Repo)
 	return nil
+}
+
+// RunSmoke tries packages until maxOK succeed (or list exhausted). For TMP e2e.
+func (a *App) RunSmoke(ctx context.Context, maxOK int) (ok int, err error) {
+	if err := toolscheck.Check(toolscheck.DefaultRun()); err != nil {
+		return 0, err
+	}
+	if err := a.LoadSigning(); err != nil {
+		return 0, err
+	}
+	if err := a.WriteFDroidConfig(); err != nil {
+		return 0, err
+	}
+	if err := a.FetchTools(ctx); err != nil {
+		return 0, err
+	}
+	jobs, err := a.ListJobs()
+	if err != nil {
+		return 0, err
+	}
+	log := logging.GetLogger(ctx)
+	if maxOK <= 0 {
+		maxOK = 1
+	}
+	for _, job := range jobs {
+		if ok >= maxOK {
+			break
+		}
+		// Prefer non-huge packages
+		low := strings.ToLower(job.PackageID)
+		if strings.Contains(low, "youtube") || strings.Contains(low, "photos") {
+			continue
+		}
+		log.Info("smoke try", "package", job.PackageID)
+		if err := a.ProcessPackage(ctx, job); err != nil {
+			log.Warn("smoke skip", "package", job.PackageID, "err", err)
+			continue
+		}
+		ok++
+	}
+	if ok == 0 {
+		return 0, fmt.Errorf("no package succeeded download+patch (tried %d jobs)", len(jobs))
+	}
+	if err := a.FDroidUpdate(true); err != nil {
+		return ok, err
+	}
+	return ok, nil
 }
 
 func emptyAsLatest(v string) string {

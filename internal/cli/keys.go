@@ -4,6 +4,7 @@ import (
 	"fmt"
 
 	"github.com/lucasew/revancedbot/internal/signing"
+	"github.com/lucasew/revancedbot/internal/toolscheck"
 	"github.com/spf13/cobra"
 )
 
@@ -21,7 +22,11 @@ func newKeysGenerateCmd() *cobra.Command {
 	c := &cobra.Command{
 		Use:   "generate",
 		Short: "Generate a keystore and print one pasteable signing secret",
+		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
+			if err := toolscheck.Check(toolscheck.KeysOnly()); err != nil {
+				return err
+			}
 			enc, err := signing.Generate(alias)
 			if err != nil {
 				return err
@@ -37,10 +42,14 @@ func newKeysGenerateCmd() *cobra.Command {
 
 func newKeysValidateCmd() *cobra.Command {
 	return &cobra.Command{
-		Use:   "validate",
-		Short: "Validate REVANCEDBOT_SIGNING and materialize keystore into the workspace",
+		Use:   "validate REPO",
+		Short: "Validate REVANCEDBOT_SIGNING and materialize keystore into CACHE",
+		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			a, err := loadApp(cmd)
+			if err := toolscheck.Check(toolscheck.KeysOnly()); err != nil {
+				return err
+			}
+			a, err := loadApp(cmd, args)
 			if err != nil {
 				return err
 			}
@@ -48,6 +57,7 @@ func newKeysValidateCmd() *cobra.Command {
 				return err
 			}
 			fmt.Println("ok: signing blob valid; keystore at", a.WS.KeystorePath)
+			fmt.Println("cache:", a.WS.Cache)
 			return nil
 		},
 	}

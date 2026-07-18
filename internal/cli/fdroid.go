@@ -3,25 +3,32 @@ package cli
 import (
 	"fmt"
 
+	"github.com/lucasew/revancedbot/internal/toolscheck"
 	"github.com/spf13/cobra"
 )
 
 func newFDroidInitCmd() *cobra.Command {
 	return &cobra.Command{
-		Use:   "fdroid-init",
-		Short: "Scaffold simple binary F-Droid layout and config.yml",
+		Use:   "fdroid-init REPO",
+		Short: "Ensure REPO layout and write generated config.yml",
+		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			a, err := loadApp(cmd)
+			if err := toolscheck.Check(toolscheck.KeysOnly()); err != nil {
+				return err
+			}
+			a, err := loadApp(cmd, args)
 			if err != nil {
 				return err
 			}
 			if err := a.LoadSigning(); err != nil {
 				return err
 			}
-			if err := a.EnsureFDroidConfig(); err != nil {
+			if err := a.WriteFDroidConfig(); err != nil {
 				return err
 			}
-			fmt.Println("fdroid root:", a.WS.FDroid)
+			fmt.Println("repo:", a.WS.Repo)
+			fmt.Println("config:", a.WS.FDroidConfig())
+			fmt.Println("keystore (cache):", a.WS.KeystorePath)
 			return nil
 		},
 	}
@@ -30,17 +37,21 @@ func newFDroidInitCmd() *cobra.Command {
 func newFDroidUpdateCmd() *cobra.Command {
 	var createMeta bool
 	c := &cobra.Command{
-		Use:   "fdroid-update",
-		Short: "Run fdroid update on the workspace F-Droid tree",
+		Use:   "fdroid-update REPO",
+		Short: "Run fdroid update on REPO (host fdroid/apksigner/aapt required)",
+		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			a, err := loadApp(cmd)
+			if err := toolscheck.Check(toolscheck.DefaultRun()); err != nil {
+				return err
+			}
+			a, err := loadApp(cmd, args)
 			if err != nil {
 				return err
 			}
 			if err := a.LoadSigning(); err != nil {
 				return err
 			}
-			if err := a.EnsureFDroidConfig(); err != nil {
+			if err := a.WriteFDroidConfig(); err != nil {
 				return err
 			}
 			return a.FDroidUpdate(createMeta)

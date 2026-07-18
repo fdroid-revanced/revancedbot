@@ -9,11 +9,15 @@ import (
 
 func newListJobsCmd() *cobra.Command {
 	return &cobra.Command{
-		Use:   "list-jobs",
-		Short: "List packages and preferred versions from ReVanced patches",
+		Use:   "list-jobs REPO",
+		Short: "List packages and preferred versions from cached ReVanced patches",
+		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			a, err := loadApp(cmd)
+			a, err := loadApp(cmd, args)
 			if err != nil {
+				return err
+			}
+			if err := a.FetchTools(ctxOf(cmd)); err != nil {
 				return err
 			}
 			jobs, err := a.ListJobs()

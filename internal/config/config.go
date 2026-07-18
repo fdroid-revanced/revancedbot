@@ -9,45 +9,52 @@ import (
 	"github.com/spf13/viper"
 )
 
-// Config is the runtime configuration loaded from revancedbot.yaml, env, and flags.
+// Config is loaded from REPO/revancedbot.yaml (authority) plus env/flags.
 type Config struct {
-	Workspace string `mapstructure:"workspace"`
+	Repo  string // absolute F-Droid root
+	Cache string // absolute cache (may be empty before layout resolves mkdtemp)
 
-	RepoName        string `mapstructure:"repo_name"`
-	RepoURL         string `mapstructure:"repo_url"`
-	RepoDescription string `mapstructure:"repo_description"`
+	RepoName        string
+	RepoURL         string
+	RepoDescription string
+	DownloaderOrder []string
+	BrowserCDPURL   string
+	PoolIO          int
+	PoolCPU         int
+	PoolInternet    int
+	LogLevel        string
 
-	DownloaderOrder []string `mapstructure:"downloaders"`
-
-	BrowserCDPURL string `mapstructure:"cdp_url"`
-
-	PoolIO       int `mapstructure:"pool_io"`
-	PoolCPU      int `mapstructure:"pool_cpu"`
-	PoolInternet int `mapstructure:"pool_internet"`
-
-	LogLevel string `mapstructure:"log_level"`
-
-	// SigningBlob is the pasteable secret (env REVANCEDBOT_SIGNING).
-	SigningBlob string `mapstructure:"-"`
-
-	GitHubToken string `mapstructure:"-"`
+	SigningBlob string
+	GitHubToken string
 }
 
-// Load reads config from path (optional), env, and applies flag overrides.
-func Load(cfgFile string, workspaceFlag string) (*Config, error) {
+// LoadFromRepo loads REPO/revancedbot.yaml (or cfgFile override).
+// cacheFlag empty means caller will mkdtemp.
+func LoadFromRepo(repo, cacheFlag, cfgFile string) (*Config, error) {
+	repoAbs, err := filepath.Abs(repo)
+	if err != nil {
+		return nil, err
+	}
+	st, err := os.Stat(repoAbs)
+	if err != nil {
+		return nil, fmt.Errorf("repo %s: %w", repoAbs, err)
+	}
+	if !st.IsDir() {
+		return nil, fmt.Errorf("repo is not a directory: %s", repoAbs)
+	}
+
 	v := viper.New()
 	v.SetConfigType("yaml")
 	v.SetEnvPrefix("REVANCEDBOT")
 	v.SetEnvKeyReplacer(strings.NewReplacer(".", "_", "-", "_"))
 	v.AutomaticEnv()
 
-	v.SetDefault("workspace", ".revancedbot")
 	v.SetDefault("repo_name", "ReVanced F-Droid Repo")
 	v.SetDefault("repo_url", "https://example.invalid/fdroid/repo")
 	v.SetDefault("repo_description", "ReVanced-patched apps (simple binary repository).")
 	v.SetDefault("downloaders", []string{"apkpure"})
 	v.SetDefault("pool_io", 4)
-	v.SetDefault("pool_cpu", 0) // 0 = NumCPU at runtime
+	v.SetDefault("pool_cpu", 0)
 	v.SetDefault("pool_internet", 4)
 	v.SetDefault("log_level", "info")
 
@@ -57,18 +64,17 @@ func Load(cfgFile string, workspaceFlag string) (*Config, error) {
 			return nil, fmt.Errorf("read config %s: %w", cfgFile, err)
 		}
 	} else {
-		// Prefer consumer-repo root file when present.
-		v.SetConfigName("revancedbot")
-		v.AddConfigPath(".")
-		_ = v.ReadInConfig() // optional
+		path := filepath.Join(repoAbs, "revancedbot.yaml")
+		if _, err := os.Stat(path); err == nil {
+			v.SetConfigFile(path)
+			if err := v.ReadInConfig(); err != nil {
+				return nil, fmt.Errorf("read %s: %w", path, err)
+			}
+		}
+		// optional: missing yaml uses defaults only
 	}
 
-	// Nested browser.cdp_url support via flat key from env REVANCEDBOT_CDP_URL
-	// and yaml:
-	// browser:
-	//   cdp_url: ...
 	type fileShape struct {
-		Workspace       string   `mapstructure:"workspace"`
 		RepoName        string   `mapstructure:"repo_name"`
 		RepoURL         string   `mapstructure:"repo_url"`
 		RepoDescription string   `mapstructure:"repo_description"`
@@ -88,7 +94,8 @@ func Load(cfgFile string, workspaceFlag string) (*Config, error) {
 	}
 
 	cfg := &Config{
-		Workspace:       raw.Workspace,
+		Repo:            repoAbs,
+		Cache:           cacheFlag,
 		RepoName:        raw.RepoName,
 		RepoURL:         raw.RepoURL,
 		RepoDescription: raw.RepoDescription,
@@ -105,21 +112,8 @@ func Load(cfgFile string, workspaceFlag string) (*Config, error) {
 	if u := os.Getenv("REVANCEDBOT_CDP_URL"); u != "" {
 		cfg.BrowserCDPURL = u
 	}
-	if workspaceFlag != "" {
-		cfg.Workspace = workspaceFlag
-	}
-	if cfg.Workspace == "" {
-		cfg.Workspace = ".revancedbot"
-	}
-	abs, err := filepath.Abs(cfg.Workspace)
-	if err != nil {
-		return nil, err
-	}
-	cfg.Workspace = abs
-
 	cfg.SigningBlob = firstNonEmpty(os.Getenv("REVANCEDBOT_SIGNING"), os.Getenv("REVANCEDBOT_SIGNING_BLOB"))
 	cfg.GitHubToken = firstNonEmpty(os.Getenv("GITHUB_TOKEN"), os.Getenv("REVANCEDBOT_GITHUB_TOKEN"))
-
 	return cfg, nil
 }
 

@@ -4,20 +4,28 @@ import (
 	"fmt"
 
 	"github.com/lucasew/revancedbot/internal/revanced"
+	"github.com/lucasew/revancedbot/internal/toolscheck"
 	"github.com/spf13/cobra"
 )
 
 func newPatchCmd() *cobra.Command {
 	var in, out string
 	c := &cobra.Command{
-		Use:   "patch",
-		Short: "Patch one APK with ReVanced (defaults + package rename + operator keystore)",
+		Use:   "patch REPO",
+		Short: "Patch one APK with ReVanced into CACHE/work (uses operator keystore)",
+		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			a, err := loadApp(cmd)
+			if err := toolscheck.Check([]toolscheck.Requirement{{Name: "java"}}); err != nil {
+				return err
+			}
+			a, err := loadApp(cmd, args)
 			if err != nil {
 				return err
 			}
 			if err := a.LoadSigning(); err != nil {
+				return err
+			}
+			if err := a.FetchTools(ctxOf(cmd)); err != nil {
 				return err
 			}
 			if in == "" || out == "" {

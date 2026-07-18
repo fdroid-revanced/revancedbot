@@ -4,11 +4,12 @@ import "testing"
 
 func TestBlobRoundTrip(t *testing.T) {
 	b := &Blob{
-		V:              1,
-		KeystoreP12B64: "AAAA",
-		StorePass:      "store",
-		KeyPass:        "key",
-		Alias:          "a",
+		V:           1,
+		KeystoreB64: "AAAA",
+		StorePass:   "store",
+		KeyPass:     "key",
+		Alias:       "a",
+		StoreType:   "JKS",
 	}
 	enc, err := b.Encode()
 	if err != nil {

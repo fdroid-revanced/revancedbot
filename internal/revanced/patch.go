@@ -6,6 +6,7 @@ import (
 	"os/exec"
 	"strings"
 
+	"github.com/lucasew/revancedbot/internal/apksign"
 	"github.com/lucasew/revancedbot/internal/signing"
 )
 
@@ -22,7 +23,8 @@ type PatchOptions struct {
 	EnableChangePackageName bool
 }
 
-// Patch runs revanced-cli patch with defaults/recommended and operator keystore.
+// Patch runs revanced-cli patch (unsigned-by-us), then re-signs with operator key via apksigner.
+// ReVanced's BouncyCastle cannot load modern keytool keystores reliably, so we do not pass --keystore to CLI.
 func Patch(opts PatchOptions) (appliedPatches []string, err error) {
 	java := opts.JavaBin
 	if java == "" {
@@ -34,19 +36,8 @@ func Patch(opts PatchOptions) (appliedPatches []string, err error) {
 		opts.InputAPK,
 		"-o", opts.OutputAPK,
 		"-p", opts.PatchesRVP,
-		"-b", // bypass RVP signature/provenance (we fetch unsigned .rvp assets)
+		"-b",
 	}
-	if opts.Blob != nil && opts.KeystorePath != "" {
-		// Common ReVanced CLI keystore flags (v4+/v5+ style).
-		args = append(args,
-			"--keystore", opts.KeystorePath,
-			"--keystore-password", opts.Blob.StorePass,
-			"--keystore-entry-alias", opts.Blob.Alias,
-			"--keystore-entry-password", opts.Blob.KeyPass,
-		)
-	}
-	// Package rename: enable the patch if the CLI supports --enable.
-	// Different CLI versions use different flag names; try the common form.
 	if opts.EnableChangePackageName {
 		args = append(args, "--enable", "Change package name")
 	}
@@ -58,15 +49,21 @@ func Patch(opts PatchOptions) (appliedPatches []string, err error) {
 	if err := cmd.Run(); err != nil {
 		return nil, fmt.Errorf("patch %s: %w\n%s%s", opts.InputAPK, err, stdout.String(), stderr.String())
 	}
-	return parseAppliedPatches(stdout.String() + "\n" + stderr.String()), nil
+	applied := parseAppliedPatches(stdout.String() + "\n" + stderr.String())
+
+	if opts.Blob != nil && opts.KeystorePath != "" {
+		if err := apksign.Sign(opts.OutputAPK, opts.KeystorePath, opts.Blob.StorePass, opts.Blob.KeyPass, opts.Blob.Alias); err != nil {
+			return applied, fmt.Errorf("re-sign with operator key: %w", err)
+		}
+	}
+	return applied, nil
 }
 
 func parseAppliedPatches(log string) []string {
 	var out []string
 	for _, line := range strings.Split(log, "\n") {
-		// Heuristic: lines mentioning "Applying" or similar.
 		l := strings.TrimSpace(line)
-		if strings.Contains(l, "Applying") || strings.Contains(l, "applied") {
+		if strings.Contains(l, "succeeded") || strings.Contains(l, "Applying") {
 			out = append(out, l)
 		}
 	}

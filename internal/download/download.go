@@ -131,6 +131,21 @@ func (a *APKPure) Fetch(ctx context.Context, req Request, destDir string) (*Resu
 		_ = os.Remove(path)
 		return nil, fmt.Errorf("download too small (%d bytes), likely not an APK", n)
 	}
+	// Reject HTML error pages that APK mirrors sometimes return.
+	head := make([]byte, 4)
+	if f2, err := os.Open(path); err == nil {
+		_, _ = f2.Read(head)
+		_ = f2.Close()
+		if string(head) == "<!DO" || string(head) == "<htm" || string(head) == "<HTM" {
+			_ = os.Remove(path)
+			return nil, fmt.Errorf("download looks like HTML, not an APK")
+		}
+		if !(head[0] == 'P' && head[1] == 'K') {
+			// APK is ZIP; allow if Android package magic via file later — still require ZIP
+			_ = os.Remove(path)
+			return nil, fmt.Errorf("download is not a ZIP/APK (magic %q)", head)
+		}
+	}
 
 	return &Result{
 		Path:     path,
