@@ -1,0 +1,476 @@
+# revancedbot — product & technical spec
+
+Status: agreed (product + toolchain + repo/cache layout grills, 2026-07-18; **progress / workspaced XP** grill, 2026-07-19).  
+Implementation is **Go** (this repository).
+
+## 1. Goal
+
+Build and maintain an **F-Droid simple binary repository** of **ReVanced-patched** Android apps:
+
+1. Resolve jobs from ReVanced patches  
+2. Download stock APKs (pluggable sources)  
+3. Patch with ReVanced CLI (defaults/recommended + forced package rename)  
+4. Sign APKs (ReVanced CLI + operator key) and the F-Droid index (`fdroid update` + same key)  
+5. Write a complete F-Droid tree to disk (git/Pages deploy is **not** this tool’s job)
+
+Primary hard problem: **reliable, pluggable APK downloaders** under hostile/unstable sources.
+
+## 2. Two-repo architecture
+
+| Repository | Role |
+|------------|------|
+| **`revancedbot` (this repo, public)** | Implementation: Go module, CLI, downloaders, patch orchestration, F-Droid helpers, **GoReleaser** release assets for mise |
+| **Consumer / F-Droid tree repo (later)** | GHA schedule, secrets, **F-Droid simple-binary root** (positional `REPO`), `revancedbot.yaml` as authority, gitignored generated `config.yml`, **how** the tree becomes Pages/branches — owned by the consumer, not the bot |
+
+Consumer visibility (public vs private) is **deferred**. The **tool** is public.
+
+## 3. Runtime & CLI
+
+| Decision | Choice |
+|----------|--------|
+| Language | **Go** (rewrite) |
+| Binary name | **`revancedbot`** |
+| CLI | **Cobra** subcommands + **Viper** config |
+| Parallelism + progress | [`workspaced/pkg/taskgroup`](https://github.com/lucasew/workspaced) — **same UX as workspaced**: Session, lazy TUI, pools, `Map`/`Each`, `Isolate` |
+| Logging | [`workspaced/pkg/logging`](https://github.com/lucasew/workspaced) — ctx `slog`; **`NewPlainHandler`** (not TextHandler) |
+| HTTP / fetch | workspaced **`httpclient`** + **`fetchurl`** drivers (minimal prelude — not full desktop prelude) |
+| GitHub API | [`google/go-github`](https://github.com/google/go-github) (ReVanced release assets; token when present) |
+| Browser automation | [**go-rod**](https://github.com/go-rod/rod) against a **CDP URL** (no in-process browser launch in production) |
+| Releases of this tool | **GoReleaser** → GitHub Releases → consumer mise pin |
+
+### 3.1 Subcommands (target surface)
+
+```text
+revancedbot
+  keys generate          # keytool under the hood; print one pasteable secret blob
+  keys validate          # validate blob / materialize keystore into CACHE
+  fetch-tools            # download CLI jar + patches into CACHE (name-based hit)
+  list-jobs              # packages × version preference order
+  download               # stock APKs into CACHE
+  patch                  # patch + sign APKs (operator keystore in CACHE)
+  fdroid-init            # ensure REPO layout; write generated config.yml
+  fdroid-update          # stage APKs into REPO/repo, metadata, run `fdroid update`
+  run REPO               # full pipeline (positional F-Droid root)
+  version
+```
+
+No **`publish`** that talks to git/Pages. Bot **only writes files**.  
+Cron shape: `revancedbot run ./path/to/fdroid-root` (after host tools + mise install).
+
+### 3.2 Paths: REPO vs CACHE
+
+Two directories. **REPO is only updated by atomic publish.** Everything else (tools, stock, keystore, patch work, F-Droid build tree, shims) lives under **CACHE**.
+
+| Path | How specified | Role |
+|------|----------------|------|
+| **REPO** | **Positional** arg (e.g. `revancedbot run ./fdroid`) | Publishable F-Droid tree + `revancedbot.yaml` authority |
+| **CACHE** | **`--cache`**; default **`os.MkdirTemp`** (ephemeral) | Disposable work; optional explicit path for local reuse |
+
+**Write rule:** during a run, stage into `CACHE/fdroid/` (seeded from live REPO for history). Run `fdroid update` **on the stage**. Only on success, **atomically** replace live `REPO/{repo,metadata,config.yml}` from the stage. Never leave partial APKs/indexes half-written in live REPO. Mid-run failure leaves REPO at the previous publish.
+
+CI: no save/restore of cache; default mkdtemp is fine. Local: pass `--cache` for naive cross-run hits.
+
+#### REPO layout (publishable — read mostly; write only via publish)
+
+```text
+REPO/
+  revancedbot.yaml     # AUTHORITY — bot config (committed; never overwritten by bot)
+  config.yml           # GENERATED — gitignored; published atomically from stage
+  .gitignore           # must include config.yml (and never keystore)
+  repo/                # APKs + indexes after successful publish
+  metadata/            # package YAML after successful publish
+  # NO keystore, tools, stock APKs, or work temps
+```
+
+#### CACHE layout (not published)
+
+```text
+CACHE/
+  tools/revanced-cli.jar
+  tools/patches.rvp
+  stock/{package}_{version}.apk    # naive cache: file exists → hit
+  signing/keystore.jks             # materialized from REVANCEDBOT_SIGNING
+  work/                            # patched APK temps
+  fdroid/                          # STAGE: full F-Droid tree + fdroid update here
+    config.yml
+    repo/
+    metadata/
+  shims/                           # apksigner wrappers for Nix/host quirks
+```
+
+**Cache hit policy:** if the expected filename exists and size is non-trivial (e.g. > 1 KiB), **skip re-download**. No content hashes, no CI cache protocol.
+
+### 3.3 Config authority
+
+| File | Role |
+|------|------|
+| **`revancedbot.yaml`** (in REPO) | **Authority.** Branding, downloaders, pools, log level, optional CDP URL. Loaded from `REPO/revancedbot.yaml` (or `--config`). |
+| **`config.yml`** (in REPO) | **Derived.** Written every run by the bot for `fdroidserver`. **Gitignored.** Do not treat as source of truth. |
+| **Env** | `REVANCEDBOT_SIGNING` (paste blob), `GITHUB_TOKEN`, `REVANCEDBOT_CDP_URL`, optional patches overrides |
+
+Generated `config.yml` sketch (passwords via fdroid env substitution when possible):
+
+```yaml
+repo_url: …                 # from revancedbot.yaml
+repo_name: …
+repo_description: …
+repo_keyalias: …
+keystore: /abs/CACHE/signing/keystore.p12
+keystorepass: {env: REVANCEDBOT_KEYSTORE_PASS}
+keypass: {env: REVANCEDBOT_KEY_PASS}
+# sdk_path: only if ANDROID_HOME is set and useful
+```
+
+Bot sets those env vars for the `fdroid` subprocess from the signing blob. **Keystore file never lives under REPO.**
+
+CLI flags: `--cache`, `--config` (override yaml path), dry-run as needed. **REPO is positional** for `run` (and commands that act on a tree).
+
+### 3.4 Progress, Session, and taskgroup (workspaced XP)
+
+**Product rule:** revancedbot gives the **same progress experience as workspaced** — not a custom bar framework. Implementation is workspaced’s Session + taskgroup TUI + drivers.
+
+#### Session lifecycle
+
+- Cobra root: **`taskgroup.Enter`** in `PersistentPreRun`, **`Session.Close`** in `PersistentPostRun` (wait tasks, tear down UI, run `AfterWait`).
+- Progress UI starts **lazily** on the first scheduled task (`Group.Go` / `Map` / `Each`), when the terminal is interactive — same guards as workspaced (no TUI if not a TTY, or `CI` / `NO_COLOR` / `TERM=dumb`).
+- Force TUI for debugging: **`WORKSPACED_FORCE_TUI=1`** (no separate `REVANCEDBOT_*` knob).
+- CI / pipes: full taskgroup semantics (pools, Isolate, cancellation rules) with **logs only** — no bars required.
+
+#### Every command uses the group
+
+- **All** subcommands that do real work schedule it through taskgroup (`Go`, `Unit`, `Map`/`Each`, `Isolate`). No sequential “side path” that bypasses the Session for long work.
+- Trivial single-step commands use a short Control/`Unit` task as needed.
+- `--help` / no work scheduled → no TUI (nothing to observe).
+
+#### Bar owners (kitchen sink)
+
+One owner per bar (workspaced hierarchy rules: do not stack extra `Unit` around `Map`/`Each` or around HTTP that already owns progress).
+
+| Work | Visible as | Pool |
+|------|------------|------|
+| All package APK work | **One `Map` `"apks"`** (N/M packages; soft-skip reduce) | **Control** |
+| Version walk / downloader order | Plain serial loops under the package child (no extra Control bars) | — |
+| HTTP bodies / scrape | httpclient progress tasks only | **Internet** |
+| ReVanced CLI jar + patches fetch | fetchurl / Internet | **Internet** |
+| ReVanced **patch** (+ re-sign) | `GoIsolated` named task | **CPU** |
+| Stage into REPO, metadata writes | `GoIsolated` | **IO** |
+| **`fdroid update`** | `GoIsolated` | **IO** |
+| Smoke | **`Each` Serial** `"smoke"` until N ok | **Control** |
+
+**Control until non-trivial work:** package shells and setup stay Control; slots for Internet/CPU/IO are taken only when that work actually runs (avoid holding Internet for the whole download+patch lifetime).
+
+#### HTTP and asset download
+
+- **`httpclient`**: all scraper / ad-hoc HTTP (including multi-step APKMirror pages + final APK body). Progress via driver’s **`WithProgress`** (every request on a group `ctx` can become a fetch bar — same as workspaced; short HTML GETs may produce short bars).
+- **`fetchurl`**: known-URL assets when we have a URL (and optional hash) — especially **ReVanced tools** (jar/rvp). Prefer fetchurl over hand-rolled download loops for those.
+- Downloaders keep custom HTML/resolve logic; they **must** use the progress-aware client for HTTP, not a bare `http.Client` that hides work from the Session.
+
+#### Logging under the UI
+
+- Root logger: **`logging.NewPlainHandler`** on stderr (workspaced-style plain lines).
+- While the TUI is active, Session output routing folds logs into the progress UI the same way workspaced does.
+
+#### Pool limits
+
+- Applied at **`Enter`** (limits are fixed for the Session).
+- When REPO / `revancedbot.yaml` is known at Session start, read **`pool_io` / `pool_cpu` / `pool_internet`**.
+- **Unspecified → taskgroup defaults** (IO=4, CPU=NumCPU, Internet=4).
+- Commands without config keep defaults.
+
+#### Package failure vs command result
+
+- Per-package work uses **`Isolate`**: one package fail does **not** cancel siblings (soft-skip).
+- Soft-skip does **not** fail `Session.Close` by itself.
+- End of `run` (and similar): **summary** of ok / skipped + reasons (logs and/or `AfterWait` print).
+- Command still **fails** on plumbing errors (preflight, signing, tool fetch hard-fail, `fdroid update`, etc.).
+- Exit 0 with some packages skipped is allowed if the pipeline completed and at least plumbing succeeded (empty-success policy for “zero packages built” may tighten later; not required for soft-skip UX).
+
+### 3.5 Module dependency (workspaced)
+
+Import from [lucasew/workspaced](https://github.com/lucasew/workspaced):
+
+| Import | Role |
+|--------|------|
+| `workspaced/pkg/taskgroup` | Session, pools, Map/Each/Isolate, progress TUI |
+| `workspaced/pkg/logging` | Ctx logger, PlainHandler, Close helpers |
+| `workspaced/pkg/driver` + **`httpclient`** | Progress-aware HTTP client |
+| `workspaced/pkg/driver` + **`fetchurl`** | Known-URL (+ optional hash) downloads |
+
+**Driver prelude:** **minimal revancedbot prelude** — blank-import only factories we need (at least `httpclient/native`, `fetchurl`). **Not** full `workspaced/pkg/driver/prelude` (no wallpaper/tray/audio zoo).
+
+Note: upstream `go.mod` currently declares `module workspaced`; require/replace may be needed until the module path is published cleanly.
+
+## 4. Toolchain (what runs on the machine)
+
+### 4.1 Host-provided tools + preflight
+
+The bot **does not install** Android SDK or download apksigner. The **host** must provide tools on `PATH` (or standard env).
+
+**Before `run` / `fdroid-update` (and any step that needs them), preflight checks every assumption** and fails with a clear missing-tool list, e.g.:
+
+| Tool | Used for |
+|------|----------|
+| `java`, `keytool` | ReVanced CLI, signing blob generate/validate |
+| `fdroid` | Simple binary `fdroid update` |
+| `apksigner` | Index / modern signing path used by fdroidserver |
+| `aapt` (or aapt2 as required by host fdroid) | APK inspection during update |
+
+Install example (Ubuntu CI): `apt-get install … apksigner aapt` plus mise for language/tool pins. Exact package names are host-specific.
+
+### 4.2 mise tools (consumer — **all versions pinned** where mise applies)
+
+| Tool | Role |
+|------|------|
+| `java` (**Temurin 21.x** pin) | ReVanced CLI, `keytool` |
+| `uv` (pinned) | Enables mise `pipx:` backend via **uv** (`pipx.uvx`, default true) |
+| `pipx:fdroidserver` (pinned) | Puts **`fdroid` on PATH** |
+| `revancedbot` (pinned to a release) | This project’s binary from GitHub Releases |
+
+Android build-tools (`apksigner`, `aapt`) are **host-provided**, not necessarily mise (may be distro packages). Optional: consumer also pins `android-sdk` via mise if they prefer; bot only checks availability.
+
+**Optional / not default:** Chrome, chromedriver — production browser path is **Browserless + CDP URL**.
+
+**Dev repo (this project):** may pin `go`, `goreleaser`, `svu`, etc.
+
+Example consumer sketch (illustrative):
+
+```toml
+[tools]
+java = "temurin-21.0.x"
+uv = "x.y.z"
+"pipx:fdroidserver" = "2.x.y"
+revancedbot = "0.1.0"
+```
+
+Renovate (or similar) bumps pins via PRs.
+
+### 4.3 Not installed via mise
+
+| Piece | Role |
+|-------|------|
+| **Browserless** (or equivalent) GHA **service container** | Headless Chromium; bot only receives CDP/WebSocket URL |
+| **ReVanced CLI `.jar` + patches `.rvp`** | Downloaded every run — **always latest**. CLI from GitHub; patches tag from **GitLab** ([where-is-revanced-patches](https://github.com/ReVanced/where-is-revanced-patches)), assets from GitHub if available else community mirror |
+
+### 4.4 Processes the bot execs
+
+| Binary | Purpose |
+|--------|---------|
+| `keytool` | Hidden behind `keys generate` / `keys validate` |
+| `java -jar revanced-cli.jar` | `list-versions`, **patch + sign APKs** with operator keystore |
+| `fdroid` | **Simple binary repo** only: scaffold + **`fdroid update`** (never `fdroid build`) |
+
+### 4.5 In-process Go libraries (selected)
+
+| Library | Role |
+|---------|------|
+| Cobra / Viper | CLI + config |
+| workspaced **taskgroup** + **logging** | Session, progress TUI, pools, ctx logger (PlainHandler) |
+| workspaced **httpclient** + **fetchurl** (minimal driver prelude) | Progress-aware HTTP; known-URL tool/asset fetch |
+| google/go-github | GitHub Releases API (metadata / discovery; large assets may still go through fetchurl/httpclient) |
+| go-rod | Browser downloaders when CDP URL is set |
+| stdlib `os/exec` | Subprocesses (`java`, `fdroid`, `keytool`, …) |
+
+### 4.6 Pipeline data flow
+
+```text
+preflight host tools (java, keytool, fdroid, apksigner, aapt, …)
+→ revancedbot run REPO [--cache DIR]
+  → load REPO/revancedbot.yaml (authority)
+  → validate REVANCEDBOT_SIGNING → materialize CACHE/signing/keystore.p12
+  → write REPO/config.yml (generated, gitignored; abs keystore path; env passwords)
+  → fetch tools into CACHE/tools (skip if name hit)
+  → list jobs
+  → for each package (Isolate): download→CACHE/stock (name hit) → patch → stage into REPO/repo
+  → metadata in REPO/metadata
+  → fdroid update (cwd=REPO)
+→ stop (REPO ready; consumer deploys REPO)
+```
+
+## 5. Job selection & failure policy
+
+| Rule | Detail |
+|------|--------|
+| Package set | **All** packages advertised by ReVanced patches |
+| Versions | **One build per package per run**: walk “most common compatible” **top → bottom** |
+| Success | First version that downloads and patches successfully wins |
+| Failure | **Skip** package; record reason; continue (**Isolate**; does not cancel siblings) |
+| Run summary | End of run: report **ok / skipped + reasons** (soft-skip does not fail the command by itself) |
+| Rebuild | **Full** pipeline work every scheduled run |
+| Same versionCode | If stock-derived versionCode already published for that patched id → **ignore** (no fake Android updates) |
+| History | **Accumulate** distinct versionCodes until cleanup is designed later |
+
+## 6. Downloaders
+
+Pluggable interface. Built-ins: **apkpure** (direct HTTP) and **apkmirror** (HTML scrape). Order is configurable via `downloaders:` in `revancedbot.yaml` (default: apkpure then apkmirror).
+
+### 6.1 Contract
+
+**Input:** stock `package_id`, exact `version` (optional hints: abi, dpi, locale).
+
+**Output:** path + light metadata (source id, optional URL, sha256).
+
+**Trust model:** **trust the source** for identity, but **reject garbage** in a common path (`ValidateAPK`): min size, ZIP/`PK` magic, not HTML, must contain `AndroidManifest.xml`. Used after every download and for stock cache hits (bad cache is deleted and re-fetched).
+
+**Artifact preference:**
+
+1. Single **APK** over XAPK / split APKS  
+2. **Universal / multi-ABI** over niche ABI  
+3. Broad DPI / nodpi over device-specific  
+
+### 6.2 Implementation style
+
+**Hybrid per source:**
+
+- Prefer plain HTTP  
+- **go-rod + CDP URL** when a source needs a browser  
+- GHA: start **Browserless** (service container); pass URL into the bot  
+- Local: same URL pattern, or disable browser downloaders if unset  
+
+### 6.3 Orchestration order
+
+1. For each preferred version (top → bottom)  
+2. For each downloader in order: try download  
+3. Download OK → patch  
+4. Patch fail → next version  
+5. Exhausted → skip package  
+
+## 7. Patching
+
+| Rule | Detail |
+|------|--------|
+| Patch set | ReVanced **defaults / recommended** |
+| Package rename | **Always** enable rename patch |
+| Rename rule | Default: **append `.revanced`** |
+| Identity | Stock id for jobs/download; **`.revanced`** id in F-Droid |
+| APK signing | **ReVanced CLI during patch** with operator keystore from secret blob |
+| ReVanced tool versions | **Always latest** CLI + patches each run |
+
+## 8. Metadata (F-Droid listing)
+
+| Field kind | Policy (v1) |
+|------------|-------------|
+| Marketing scrapers (Play, APKMirror, …) | **Deferred** — not reliable enough to promise in v1 |
+| Base listing | From APK + **`fdroid update`** / create-metadata (`-c` as needed) |
+| Description | Always include **Patches applied:** from the successful patch run |
+| Scrapers later | Pluggable providers can be added; try every run + last-good cache when they exist |
+
+## 9. Signing
+
+1. `revancedbot keys generate` → runs **`keytool`** internally → prints **one text blob**.  
+2. Paste blob into one GHA secret (e.g. `REVANCEDBOT_SIGNING`).  
+3. On run: **validate** blob or refuse to start.  
+4. Materialize keystore **only under CACHE** (`CACHE/signing/keystore.p12`).  
+5. Generate **REPO/config.yml** with absolute `keystore:` path; passwords via `{env: …}` for the `fdroid` process (not committed — file is gitignored).  
+6. **Same key** signs **all APKs** (via ReVanced CLI) and the **F-Droid index** (via fdroidserver).
+
+User never manages keytool flags in the happy path. **No keystore in REPO.**
+
+## 10. F-Droid repo output
+
+| Piece | Choice |
+|-------|--------|
+| Mode | **Simple binary repository only** (no `fdroid build`) |
+| Index tool | **`fdroid`** on PATH (often mise `pipx:fdroidserver`) |
+| In | Positional **REPO** (+ `revancedbot.yaml`) |
+| Out | Same **REPO** updated in place (`repo/`, `metadata/`, indexes, generated `config.yml`) |
+| Deploy | **Out of scope** for the bot (branches/Pages = consumer) |
+| Cleanup | Not in v1 |
+| API shape | Effectively `Update(ctx, repoDir)` — REPO is the F-Droid root |
+
+## 11. Consumer CI (target)
+
+```yaml
+# Conceptual — lives in the consumer repo (F-Droid tree at repo root or subdir)
+on:
+  schedule:
+    - cron: "0 2 * * 6"   # Saturday 02:00 UTC
+  workflow_dispatch:
+
+jobs:
+  build-repo:
+    runs-on: ubuntu-latest
+    services:
+      browserless:
+        image: ghcr.io/browserless/chromium  # pin digest/tag in real workflow
+        ports:
+          - 3000:3000
+    steps:
+      - checkout
+      - install host tools (e.g. apt: apksigner aapt …)
+      - mise install                 # java, uv, fdroidserver, revancedbot pins
+      - revancedbot run .            # or path to F-Droid root; --cache optional
+        env:
+          REVANCEDBOT_SIGNING: ${{ secrets.REVANCEDBOT_SIGNING }}
+          REVANCEDBOT_CDP_URL: ws://localhost:3000
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      # consumer-owned: commit REPO (without config.yml if gitignored) / pages deploy / …
+```
+
+No CI cache restore for `CACHE` required; default mkdtemp is intentional simplicity.
+
+## 12. Distribution of this tool
+
+- **GoReleaser** publishes multi-arch binaries to GitHub Releases.  
+- Consumer pins `revancedbot = "x.y.z"` in mise.  
+- ReVanced jars/patches are **never** inside the release artifact.
+
+## 13. Explicit non-goals (v1)
+
+- Incremental skip of download/patch work  
+- Per-app custom patch matrices  
+- Automatic cleanup of historical APKs  
+- Consumer public-vs-private decision  
+- Hard integrity verification inside downloaders  
+- Bot-owned git/Pages publishing  
+- Reliable Play/APKMirror marketing scrapers  
+- Multi-tenant hosted SaaS  
+- `fdroid build` / full buildserver mode  
+- Smart content-addressed cache / CI cache save-restore for tools & APKs  
+- Keystore or secrets committed in REPO  
+- Bot installing Android SDK / apksigner  
+
+## 14. Gap map (current tree → target)
+
+| Area | Prior / scaffold | Target |
+|------|-------------------|--------|
+| Language | — | Go + Cobra/Viper |
+| Scope | Dump APKs to Pages from this repo | Simple binary F-Droid tree; deploy elsewhere |
+| Jobs | Many versions per package | One package → version walk → one success |
+| Failures | bare `except` | Isolate + structured skip |
+| Download | Selenium local Chrome | HTTP + rod/CDP (Browserless on GHA) |
+| F-Droid | unused `fdroidserver` dep | mise `pipx:fdroidserver` + `fdroid update` |
+| Keys | none | keytool abstracted → paste secret |
+| Metadata | none | APK/fdroid + patches footer; scrapers later |
+| Parallelism | sequential | workspaced taskgroup Session + pools |
+| Progress UI | none | workspaced lazy TUI (same XP); CI logs only |
+| HTTP download | ad hoc | httpclient + fetchurl drivers (minimal prelude) |
+| Logging | logging module ad hoc | workspaced PlainHandler + ctx logger |
+| Releases | none | GoReleaser + pinned mise |
+
+## 15. Suggested implementation order
+
+1. Go module scaffold, Cobra, Viper, workspaced logging/taskgroup Session  
+2. Minimal driver prelude (httpclient + fetchurl); PlainHandler; pools at Enter from yaml  
+3. `keys generate` / `validate` (keytool + blob)  
+4. `fetch-tools` via fetchurl + `list-jobs` (GitLab/GitHub/mirrors for patches)  
+5. Downloader interface + HTTP sources on httpclient; rod path behind CDP URL  
+6. `patch` (defaults, `.revanced`, operator keystore) as CPU task  
+7. **REPO positional + CACHE (`--cache` / mkdtemp); naive name hits; no temp in REPO**  
+8. **`revancedbot.yaml` authority → generate gitignored `config.yml`; host tool preflight**  
+9. Simple binary `fdroid-init` / `fdroid-update` (IO task) with host `apksigner`/`aapt`  
+10. `run REPO` + Control package Each + Isolate + end summary  
+11. Align all subcommands with taskgroup (no sequential side paths)  
+12. GoReleaser + example consumer layout (`.gitignore` includes `config.yml`)  
+13. (Later) marketing scrapers + more downloaders  
+
+## 16. Open implementation details (non-blocking)
+
+- Exact `revancedbot.yaml` schema field list  
+- Exact secret blob JSON schema (`v: 1`, …)  
+- Exact env var names for fdroid `{env: …}` password wiring  
+- Exact Browserless image pin and CDP path/token  
+- First downloader source priority list  
+- Go module path (`github.com/lucasew/revancedbot` expected)  
+- workspaced require/replace until module path is clean  
+- How much metadata `fdroid update -c` generates vs what we write by hand  
+- Whether generated `config.yml` is always deleted after run or left gitignored on disk  

@@ -1,0 +1,25 @@
+# Place this file in the F-Droid simple-binary REPO root as revancedbot.yaml.
+# It is the authority; the bot generates config.yml (gitignored) for fdroidserver.
+#
+# Usage:
+#   revancedbot run /path/to/this/repo
+#   revancedbot run /path/to/this/repo --cache /var/tmp/revancedbot-cache
+
+repo_name: ReVanced F-Droid Repo
+repo_url: https://example.invalid/fdroid/repo
+repo_description: >
+  ReVanced-patched applications (simple binary repository).
+
+downloaders:
+  - apkpure
+  - apkmirror
+
+browser:
+  # GHA Browserless service example:
+  # cdp_url: ws://localhost:3000
+  cdp_url: ""
+
+pool_io: 4
+pool_cpu: 0        # 0 = NumCPU
+pool_internet: 4
+log_level: info

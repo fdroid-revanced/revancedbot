@@ -1,3 +1,33 @@
+# Dev toolchain for this repository (pins). Consumer repos pin their own set.
 [tools]
-java = "latest"
-uv = "latest"
+go = "1.25.6"
+java = "temurin-21.0.7+6.0.LTS"
+goreleaser = "2.17.0"
+svu = "3.3.0"
+"pipx:fdroidserver" = "2.4.5"
+
+[tasks.build]
+run = "go build -o bin/revancedbot ./cmd/revancedbot"
+
+[tasks.test]
+run = "go test ./..."
+
+[tasks."test:e2e"]
+description = "End-to-end pipeline (keytool, fetch ReVanced tools, list-jobs, fdroid scaffold)"
+depends = ["build"]
+# GITHUB_TOKEN improves rate limits; REVANCEDBOT_E2E_STRICT=1 fails soft steps too
+run = "go test -tags=e2e -count=1 -timeout=30m ./e2e/"
+
+[tasks.release]
+description = "Tag with svu and run goreleaser"
+depends = ["test"]
+usage = '''
+arg "<version>" help="New version" {
+  choices "next" "major" "minor" "patch"
+  default "next"
+}
+'''
+run = '''
+git tag $(svu ${usage_version})
+goreleaser release --clean
+'''
