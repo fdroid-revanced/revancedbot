@@ -12,6 +12,7 @@ import (
 	"github.com/lucasew/revancedbot/internal/config"
 	"github.com/lucasew/revancedbot/internal/download"
 	"github.com/lucasew/revancedbot/internal/fdroid"
+	"github.com/lucasew/revancedbot/internal/netx"
 	"github.com/lucasew/revancedbot/internal/revanced"
 	"github.com/lucasew/revancedbot/internal/signing"
 	"github.com/lucasew/revancedbot/internal/toolscheck"
@@ -158,7 +159,7 @@ func (a *App) processVersion(ctx context.Context, job revanced.Job, ver string, 
 			label = "latest"
 		}
 		log.Info("download attempt", "package", job.PackageID, "version", label)
-		got, err := download.FetchFirst(ctx, reg, order, download.Request{
+		got, err := download.FetchFirst(netx.WithLabel(ctx, "download stock "+job.PackageID), reg, order, download.Request{
 			PackageID: job.PackageID,
 			Version:   reqVer,
 		}, a.WS.StockAPKs)
@@ -204,9 +205,9 @@ func (a *App) processVersion(ctx context.Context, job revanced.Job, ver string, 
 	}
 
 	var patches []string
-	err := taskgroup.GoIsolated(ctx, "patch:"+job.PackageID, taskgroup.CPU, func(ctx context.Context, s *taskgroup.Status) error {
+	err := taskgroup.GoIsolated(ctx, "patch "+job.PackageID, taskgroup.CPU, func(ctx context.Context, s *taskgroup.Status) error {
 		defer s.Unit()()
-		s.Update("revanced-cli")
+		s.Update("ReVanced CLI")
 		log.Info("patching", "in", res.Path, "out", outPath, "version", resolved)
 		ps, err := revanced.Patch(revanced.PatchOptions{
 			CLIJar:                  a.WS.PatcherJAR(),
@@ -228,9 +229,9 @@ func (a *App) processVersion(ctx context.Context, job revanced.Job, ver string, 
 	}
 
 	pubID := job.PackageID + ".revanced"
-	if err := taskgroup.GoIsolated(ctx, "stage:"+job.PackageID, taskgroup.IO, func(ctx context.Context, s *taskgroup.Status) error {
+	if err := taskgroup.GoIsolated(ctx, "stage "+job.PackageID, taskgroup.IO, func(ctx context.Context, s *taskgroup.Status) error {
 		defer s.Unit()()
-		s.Update("stage")
+		s.Update("copy into F-Droid stage")
 		if err := fdroid.StageAPK(a.WS.Stage, outPath); err != nil {
 			return err
 		}
@@ -281,7 +282,7 @@ func (a *App) FDroidUpdate(ctx context.Context, createMeta bool) error {
 	if a.Blob == nil {
 		return fmt.Errorf("signing not loaded")
 	}
-	return taskgroup.GoIsolated(ctx, "fdroid-update", taskgroup.IO, func(ctx context.Context, s *taskgroup.Status) error {
+	return taskgroup.GoIsolated(ctx, "rebuild F-Droid index", taskgroup.IO, func(ctx context.Context, s *taskgroup.Status) error {
 		defer s.Unit()()
 		s.Update("fdroid update")
 		return fdroid.Update(a.WS.Stage, a.Blob, createMeta, a.WS.Shims)
@@ -319,12 +320,12 @@ func (a *App) RunFull(ctx context.Context) error {
 
 	// One aggregate bar for all package APK work. Pure reduce after soft-skips.
 	outcomes, err := taskgroup.Map[revanced.Job, pkgOutcome]{
-		Name:     "apks",
+		Name:     "packages",
 		Items:    jobs,
 		PoolKind: taskgroup.Control,
 		TaskName: func(_ int, j revanced.Job) string { return j.PackageID },
 		Fn: func(ctx context.Context, s *taskgroup.Status, job revanced.Job) (pkgOutcome, error) {
-			s.Update(job.PackageID)
+			s.Update("process " + job.PackageID)
 			err := taskgroup.Isolate(ctx, func(ctx context.Context) error {
 				return a.ProcessPackage(ctx, job)
 			})
@@ -416,7 +417,7 @@ func (a *App) RunSmoke(ctx context.Context, maxOK int) (ok int, err error) {
 
 	var okCount atomic.Int64
 	err = taskgroup.Each[revanced.Job]{
-		Name:     "smoke",
+		Name:     "smoke packages",
 		Items:    candidates,
 		PoolKind: taskgroup.Control,
 		Serial:   true,

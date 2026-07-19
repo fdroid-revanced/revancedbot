@@ -35,6 +35,7 @@ func FetchLatest(ctx context.Context, token, cliJarPath, patchesPath string) err
 
 // FetchCLI downloads the latest revanced-cli jar from GitHub.
 func FetchCLI(ctx context.Context, token, cliJarPath string) error {
+	ctx = netx.WithLabel(ctx, "download ReVanced CLI")
 	client := githubClient(ctx, token)
 	if err := downloadLatestGitHubAsset(ctx, client, "ReVanced", "revanced-cli", func(name string) bool {
 		return strings.HasSuffix(name, ".jar") && !strings.Contains(name, "sources")
@@ -53,6 +54,7 @@ func FetchCLI(ctx context.Context, token, cliJarPath string) error {
 //  4. Try GitHub release assets for that tag
 //  5. Try SourceForge revanced.mirror for that tag (community mirror of .rvp)
 func FetchPatches(ctx context.Context, token, patchesPath string) error {
+	ctx = netx.WithLabel(ctx, "download ReVanced patches")
 	if local := strings.TrimSpace(os.Getenv("REVANCEDBOT_PATCHES_FILE")); local != "" {
 		return copyFile(local, patchesPath)
 	}

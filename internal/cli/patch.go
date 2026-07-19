@@ -30,17 +30,17 @@ func newPatchCmd() *cobra.Command {
 			}
 			ctx := ctxOf(cmd)
 			log := logging.GetLogger(ctx)
-			return schedule(ctx, "patch", taskgroup.Control, func(ctx context.Context, s *taskgroup.Status) error {
-				s.Update("setup")
+			return schedule(ctx, "patch APK", taskgroup.Control, func(ctx context.Context, s *taskgroup.Status) error {
+				s.Update("prepare")
 				if err := a.LoadSigning(); err != nil {
 					return err
 				}
 				if err := a.FetchTools(ctx); err != nil {
 					return err
 				}
-				return taskgroup.GoIsolated(ctx, "patch:cli", taskgroup.CPU, func(ctx context.Context, s *taskgroup.Status) error {
+				return taskgroup.GoIsolated(ctx, "run ReVanced CLI", taskgroup.CPU, func(ctx context.Context, s *taskgroup.Status) error {
 					defer s.Unit()()
-					s.Update("revanced-cli")
+					s.Update("ReVanced CLI")
 					patches, err := revanced.Patch(revanced.PatchOptions{
 						CLIJar:                  a.WS.PatcherJAR(),
 						PatchesRVP:              a.WS.PatchesRVP(),

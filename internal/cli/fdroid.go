@@ -60,8 +60,8 @@ func newFDroidUpdateCmd() *cobra.Command {
 			}
 			ctx := ctxOf(cmd)
 			log := logging.GetLogger(ctx)
-			return schedule(ctx, "fdroid-update-cmd", taskgroup.Control, func(ctx context.Context, s *taskgroup.Status) error {
-				s.Update("setup")
+			return schedule(ctx, "rebuild F-Droid repo", taskgroup.Control, func(ctx context.Context, s *taskgroup.Status) error {
+				s.Update("prepare stage")
 				if err := a.LoadSigning(); err != nil {
 					return err
 				}

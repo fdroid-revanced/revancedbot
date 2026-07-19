@@ -19,8 +19,8 @@ func newFetchToolsCmd() *cobra.Command {
 				return err
 			}
 			ctx := ctxOf(cmd)
-			return schedule(ctx, "fetch-tools", taskgroup.Control, func(ctx context.Context, s *taskgroup.Status) error {
-				s.Update("tools")
+			return schedule(ctx, "download ReVanced tools", taskgroup.Control, func(ctx context.Context, s *taskgroup.Status) error {
+				s.Update("CLI jar + patches")
 				if err := a.FetchTools(ctx); err != nil {
 					return err
 				}

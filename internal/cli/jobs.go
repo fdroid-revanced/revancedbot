@@ -23,8 +23,8 @@ func newListJobsCmd() *cobra.Command {
 			}
 			ctx := ctxOf(cmd)
 			log := logging.GetLogger(ctx)
-			return schedule(ctx, "list-jobs", taskgroup.Control, func(ctx context.Context, s *taskgroup.Status) error {
-				s.Update("jobs")
+			return schedule(ctx, "list ReVanced packages", taskgroup.Control, func(ctx context.Context, s *taskgroup.Status) error {
+				s.Update("list-versions")
 				if err := a.FetchTools(ctx); err != nil {
 					return err
 				}

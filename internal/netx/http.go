@@ -12,6 +12,11 @@ import (
 	"workspaced/pkg/logging"
 )
 
+// WithLabel sets a human-readable progress task name for HTTP work under ctx.
+func WithLabel(ctx context.Context, label string) context.Context {
+	return httpclient.WithTaskLabel(ctx, label)
+}
+
 // Client returns a progress-aware HTTP client (workspaced httpclient driver when
 // registered; otherwise DefaultTransport + WithProgress).
 func Client(ctx context.Context) *http.Client {
@@ -35,7 +40,6 @@ func buildClient(ctx context.Context, withJar bool) *http.Client {
 			Transport: httpclient.WithProgress(http.DefaultTransport),
 		}
 	}
-	// Clone so we can set Timeout/Jar without mutating the driver singleton.
 	c := *base
 	if c.Timeout == 0 {
 		c.Timeout = 10 * time.Minute

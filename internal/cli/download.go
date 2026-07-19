@@ -27,7 +27,7 @@ func newDownloadCmd() *cobra.Command {
 			}
 			ctx := ctxOf(cmd)
 			log := logging.GetLogger(ctx)
-			return schedule(ctx, "download:"+pkg, taskgroup.Control, func(ctx context.Context, s *taskgroup.Status) error {
+			return schedule(ctx, "download stock "+pkg, taskgroup.Control, func(ctx context.Context, s *taskgroup.Status) error {
 				s.Update(pkg)
 				path := a.WS.StockAPKPath(pkg, ver)
 				if workspace.CacheHit(path) && download.AcceptCached(path) == nil {
