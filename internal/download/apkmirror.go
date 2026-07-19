@@ -203,24 +203,46 @@ func (a *APKMirror) findVariant(ctx context.Context, cl *http.Client, releasePat
 			end = len(html)
 		}
 		window := strings.ToLower(stripTags(html[start:end]))
+		// Skip APK bundles / APKM / split packages entirely — we only accept single APKs.
+		if isBundleVariant(path, window) {
+			continue
+		}
 		cands = append(cands, cand{path: path, score: scoreVariant(window, path), ctx: window})
 	}
 	if len(cands) == 0 {
-		return "", fmt.Errorf("no APK variants on %s", releasePath)
+		return "", fmt.Errorf("no plain APK variants on %s (bundles/APKM only or none listed)", releasePath)
 	}
 	sort.SliceStable(cands, func(i, j int) bool {
 		return cands[i].score > cands[j].score
 	})
-	// Prefer positive scores (APK + universal-ish); still take best even if all low.
+	// Prefer universal / nodpi when several plain APKs exist.
 	return cands[0].path, nil
+}
+
+// isBundleVariant reports APKMirror variants that are not a single installable APK
+// (bundle / APKM / split packages). Those fail ValidateAPK and waste a download.
+func isBundleVariant(path, window string) bool {
+	lowPath := strings.ToLower(path)
+	if strings.Contains(lowPath, "bundle") || strings.Contains(lowPath, "apkm") {
+		return true
+	}
+	// Nearby table text on the release page.
+	if strings.Contains(window, "bundle") ||
+		strings.Contains(window, "apkm") ||
+		strings.Contains(window, "xapk") ||
+		strings.Contains(window, "apks") ||
+		strings.Contains(window, "split apk") {
+		return true
+	}
+	return false
 }
 
 func scoreVariant(window, path string) int {
 	s := 0
 	lowPath := strings.ToLower(path)
-	// Prefer plain APK pages over bundle/APKM naming in the slug.
-	if strings.Contains(lowPath, "bundle") || strings.Contains(window, " apkm ") || strings.Contains(window, "bundle") {
-		s -= 50
+	// Bundles are filtered before scoring; keep a safety penalty if labels slip through.
+	if isBundleVariant(path, window) {
+		return -1000
 	}
 	if strings.Contains(window, "universal") {
 		s += 30

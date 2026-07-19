@@ -17,9 +17,20 @@ func TestVersionSlug(t *testing.T) {
 func TestScoreVariant_prefersUniversal(t *testing.T) {
 	u := scoreVariant("universal android 10+ nodpi", "/apk/x/y/z-android-apk-download/")
 	a := scoreVariant("arm64-v8a android 10+ 480dpi", "/apk/x/y/z-2-android-apk-download/")
-	b := scoreVariant("bundle apkm", "/apk/x/y/z-bundle-apk-download/")
-	if !(u > a && a > b) {
-		t.Fatalf("scores universal=%d abi=%d bundle=%d; want universal > abi > bundle", u, a, b)
+	if !(u > a) {
+		t.Fatalf("scores universal=%d abi=%d; want universal > abi", u, a)
+	}
+}
+
+func TestIsBundleVariant(t *testing.T) {
+	if !isBundleVariant("/apk/x/y/z-bundle-apk-download/", "something") {
+		t.Fatal("path with bundle should be filtered")
+	}
+	if !isBundleVariant("/apk/x/y/z-android-apk-download/", "APKM FILE") {
+		t.Fatal("window with apkm should be filtered")
+	}
+	if isBundleVariant("/apk/x/y/z-android-apk-download/", "universal android 10+ nodpi") {
+		t.Fatal("plain universal APK must not be filtered")
 	}
 }
 
