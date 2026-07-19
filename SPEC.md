@@ -141,15 +141,14 @@ One owner per bar (workspaced hierarchy rules: do not stack extra `Unit` around 
 
 | Work | Visible as | Pool |
 |------|------------|------|
-| Package fan-out | **`Map`** packages → outcome (soft-skip reduce) | **Control** |
-| Version walk per package | **`Map` Serial** over preferred versions (first win) | **Control** |
-| Stock APK sources | **`Map` Serial** over downloaders (`apk:pkg[:ver]`) | **Internet** |
-| HTTP bodies / scrape | httpclient progress tasks under the above | **Internet** |
+| All package APK work | **One `Map` `"apks"`** (N/M packages; soft-skip reduce) | **Control** |
+| Version walk / downloader order | Plain serial loops under the package child (no extra Control bars) | — |
+| HTTP bodies / scrape | httpclient progress tasks only | **Internet** |
 | ReVanced CLI jar + patches fetch | fetchurl / Internet | **Internet** |
 | ReVanced **patch** (+ re-sign) | `GoIsolated` named task | **CPU** |
 | Stage into REPO, metadata writes | `GoIsolated` | **IO** |
 | **`fdroid update`** | `GoIsolated` | **IO** |
-| Smoke | **`Each` Serial** over candidates until N ok | **Control** |
+| Smoke | **`Each` Serial** `"smoke"` until N ok | **Control** |
 
 **Control until non-trivial work:** package shells and setup stay Control; slots for Internet/CPU/IO are taken only when that work actually runs (avoid holding Internet for the whole download+patch lifetime).
 

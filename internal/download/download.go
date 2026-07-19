@@ -10,11 +10,9 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
-	"sync/atomic"
 
 	"github.com/lucasew/revancedbot/internal/netx"
 	"workspaced/pkg/logging"
-	"workspaced/pkg/taskgroup"
 )
 
 // Request is a stock APK fetch request.
@@ -51,86 +49,26 @@ func DefaultRegistry() Registry {
 	}
 }
 
-type dlAttempt struct {
-	ID string
-}
-
-// FetchFirst tries downloaders in order until one succeeds and the file
-// passes ValidateAPK. With a taskgroup on ctx, each source is a Serial Map
-// child under one aggregate bar (apk:package[:version]).
+// FetchFirst tries downloaders in order until one succeeds and ValidateAPK passes.
+// No per-source taskgroup Map — progress stays on the parent "apks" aggregate bar
+// plus httpclient fetch bars for real network I/O.
 func FetchFirst(ctx context.Context, reg Registry, order []string, req Request, destDir string) (*Result, error) {
 	if len(order) == 0 {
 		order = DefaultOrder
 	}
-	items := make([]dlAttempt, 0, len(order))
+	var errs []string
 	for _, id := range order {
-		items = append(items, dlAttempt{ID: id})
-	}
-
-	if taskgroup.FromContext(ctx) == nil {
-		return fetchFirstLoop(ctx, reg, items, req, destDir)
-	}
-
-	var winner atomic.Pointer[Result]
-	name := "apk:" + req.PackageID
-	if v := strings.TrimSpace(req.Version); v != "" {
-		name += ":" + v
-	}
-
-	type outcome struct {
-		err string
-	}
-	outcomes, err := taskgroup.Map[dlAttempt, outcome]{
-		Name:     name,
-		Items:    items,
-		PoolKind: taskgroup.Internet,
-		Serial:   true,
-		TaskName: func(_ int, a dlAttempt) string { return a.ID },
-		Fn: func(ctx context.Context, s *taskgroup.Status, a dlAttempt) (outcome, error) {
-			s.Update(a.ID)
-			if winner.Load() != nil {
-				return outcome{}, nil
-			}
-			res, err := tryDownloader(ctx, reg, a.ID, req, destDir)
-			if err != nil {
-				return outcome{err: err.Error()}, nil
-			}
-			winner.Store(res)
-			if logging.ContextHasLogger(ctx) {
-				logging.GetLogger(ctx).Info("stock apk ok",
-					"source", res.SourceID,
-					"package", req.PackageID,
-					"path", res.Path,
-				)
-			}
-			return outcome{}, nil
-		},
-	}.Run(ctx)
-	if err != nil {
-		return nil, err
-	}
-	if w := winner.Load(); w != nil {
-		return w, nil
-	}
-	var errs []string
-	for _, o := range outcomes {
-		if o.err != "" {
-			errs = append(errs, o.err)
-		}
-	}
-	if len(errs) == 0 {
-		return nil, fmt.Errorf("all downloaders failed")
-	}
-	return nil, fmt.Errorf("all downloaders failed: %s", strings.Join(errs, "; "))
-}
-
-func fetchFirstLoop(ctx context.Context, reg Registry, items []dlAttempt, req Request, destDir string) (*Result, error) {
-	var errs []string
-	for _, a := range items {
-		res, err := tryDownloader(ctx, reg, a.ID, req, destDir)
+		res, err := tryDownloader(ctx, reg, id, req, destDir)
 		if err != nil {
 			errs = append(errs, err.Error())
 			continue
+		}
+		if logging.ContextHasLogger(ctx) {
+			logging.GetLogger(ctx).Info("stock apk ok",
+				"source", res.SourceID,
+				"package", req.PackageID,
+				"path", res.Path,
+			)
 		}
 		return res, nil
 	}

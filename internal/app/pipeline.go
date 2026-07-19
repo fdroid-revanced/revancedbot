@@ -95,6 +95,8 @@ func (a *App) ListJobs() ([]revanced.Job, error) {
 }
 
 // ProcessPackage downloads and patches one package (version walk).
+// No nested Control Maps — progress for stock APKs is owned by the parent
+// "apks" Map in RunFull (plus httpclient fetch bars for network).
 func (a *App) ProcessPackage(ctx context.Context, job revanced.Job) error {
 	log := logging.GetLogger(ctx)
 	reg := download.DefaultRegistry()
@@ -108,63 +110,19 @@ func (a *App) ProcessPackage(ctx context.Context, job revanced.Job) error {
 		versions = []string{""}
 	}
 
-	// No taskgroup (tests / odd callers): plain serial version walk.
-	if taskgroup.FromContext(ctx) == nil {
-		var lastErr error
-		for _, ver := range versions {
-			if err := a.processVersion(ctx, job, ver, reg, order); err != nil {
-				lastErr = err
-				log.Warn("version failed", "package", job.PackageID, "version", emptyAsLatest(ver), "err", err)
-				continue
-			}
-			return nil
+	var lastErr error
+	for _, ver := range versions {
+		if err := a.processVersion(ctx, job, ver, reg, order); err != nil {
+			lastErr = err
+			log.Warn("version failed", "package", job.PackageID, "version", emptyAsLatest(ver), "err", err)
+			continue
 		}
-		if lastErr == nil {
-			lastErr = fmt.Errorf("no versions to try")
-		}
-		return fmt.Errorf("skip %s: %w", job.PackageID, lastErr)
-	}
-
-	// Serial Map over preferred versions: first full success wins; later versions no-op.
-	var won atomic.Bool
-	type verOutcome struct {
-		err string
-	}
-	outcomes, err := taskgroup.Map[string, verOutcome]{
-		Name:     "versions:" + job.PackageID,
-		Items:    versions,
-		PoolKind: taskgroup.Control,
-		Serial:   true,
-		TaskName: func(_ int, ver string) string { return emptyAsLatest(ver) },
-		Fn: func(ctx context.Context, s *taskgroup.Status, ver string) (verOutcome, error) {
-			s.Update(emptyAsLatest(ver))
-			if won.Load() {
-				return verOutcome{}, nil
-			}
-			if err := a.processVersion(ctx, job, ver, reg, order); err != nil {
-				log.Warn("version failed", "package", job.PackageID, "version", emptyAsLatest(ver), "err", err)
-				return verOutcome{err: err.Error()}, nil
-			}
-			won.Store(true)
-			return verOutcome{}, nil
-		},
-	}.Run(ctx)
-	if err != nil {
-		return err
-	}
-	if won.Load() {
 		return nil
 	}
-	var errs []string
-	for _, o := range outcomes {
-		if o.err != "" {
-			errs = append(errs, o.err)
-		}
+	if lastErr == nil {
+		lastErr = fmt.Errorf("no versions to try")
 	}
-	if len(errs) == 0 {
-		return fmt.Errorf("skip %s: no versions to try", job.PackageID)
-	}
-	return fmt.Errorf("skip %s: %s", job.PackageID, strings.Join(errs, "; "))
+	return fmt.Errorf("skip %s: %w", job.PackageID, lastErr)
 }
 
 func (a *App) processVersion(ctx context.Context, job revanced.Job, ver string, reg download.Registry, order []string) error {
@@ -182,7 +140,6 @@ func (a *App) processVersion(ctx context.Context, job revanced.Job, ver string, 
 	}
 	if res == nil {
 		log.Info("download attempt", "package", job.PackageID, "version", emptyAsLatest(ver))
-		// Map over downloaders (Serial) lives inside FetchFirst.
 		got, err := download.FetchFirst(ctx, reg, order, download.Request{
 			PackageID: job.PackageID,
 			Version:   ver,
@@ -292,9 +249,9 @@ func (a *App) RunFull(ctx context.Context) error {
 	}
 	log.Info("jobs loaded", "count", len(jobs), "repo", a.WS.Repo, "cache", a.WS.Cache)
 
-	// Map packages → outcome (soft-skip inside Isolate). Pure reduce after.
+	// One aggregate bar for all package APK work. Pure reduce after soft-skips.
 	outcomes, err := taskgroup.Map[revanced.Job, pkgOutcome]{
-		Name:     "packages",
+		Name:     "apks",
 		Items:    jobs,
 		PoolKind: taskgroup.Control,
 		TaskName: func(_ int, j revanced.Job) string { return j.PackageID },
