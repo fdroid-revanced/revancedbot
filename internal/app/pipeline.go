@@ -6,7 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
-	"sync"
+	"sync/atomic"
 
 	"github.com/lucasew/revancedbot/internal/config"
 	"github.com/lucasew/revancedbot/internal/download"
@@ -108,95 +108,147 @@ func (a *App) ProcessPackage(ctx context.Context, job revanced.Job) error {
 		versions = []string{""}
 	}
 
-	var lastErr error
-	for _, ver := range versions {
-		stockPath := a.WS.StockAPKPath(job.PackageID, ver)
-		var res *download.Result
-		if workspace.CacheHit(stockPath) {
-			if err := download.AcceptCached(stockPath); err != nil {
-				log.Warn("stock cache rejected", "path", stockPath, "err", err)
-			} else {
-				log.Info("stock cache hit", "path", stockPath)
-				res = &download.Result{Path: stockPath, SourceID: "cache"}
-			}
-		}
-		if res == nil {
-			log.Info("download attempt", "package", job.PackageID, "version", emptyAsLatest(ver))
-			got, err := download.FetchFirst(ctx, reg, order, download.Request{
-				PackageID: job.PackageID,
-				Version:   ver,
-			}, a.WS.StockAPKs)
-			if err != nil {
+	// No taskgroup (tests / odd callers): plain serial version walk.
+	if taskgroup.FromContext(ctx) == nil {
+		var lastErr error
+		for _, ver := range versions {
+			if err := a.processVersion(ctx, job, ver, reg, order); err != nil {
 				lastErr = err
-				log.Warn("download failed", "err", err)
+				log.Warn("version failed", "package", job.PackageID, "version", emptyAsLatest(ver), "err", err)
 				continue
 			}
-			if got.Path != stockPath {
-				if err := os.Rename(got.Path, stockPath); err != nil {
-					b, rerr := os.ReadFile(got.Path)
-					if rerr != nil {
-						lastErr = rerr
-						continue
-					}
-					if werr := os.WriteFile(stockPath, b, 0o644); werr != nil {
-						lastErr = werr
-						continue
-					}
-					_ = os.Remove(got.Path)
-				}
-				got.Path = stockPath
-			}
-			res = got
-		}
-
-		outName := fmt.Sprintf("%s_%s_revanced.apk", sanitize(job.PackageID), sanitize(emptyAsLatest(ver)))
-		outPath := filepath.Join(a.WS.Work, outName)
-		_ = os.MkdirAll(a.WS.Work, 0o755)
-
-		var patches []string
-		err := taskgroup.GoIsolated(ctx, "patch:"+job.PackageID, taskgroup.CPU, func(ctx context.Context, s *taskgroup.Status) error {
-			defer s.Unit()()
-			s.Update("revanced-cli")
-			log.Info("patching", "in", res.Path, "out", outPath)
-			ps, err := revanced.Patch(revanced.PatchOptions{
-				CLIJar:                  a.WS.PatcherJAR(),
-				PatchesRVP:              a.WS.PatchesRVP(),
-				InputAPK:                res.Path,
-				OutputAPK:               outPath,
-				KeystorePath:            a.WS.KeystorePath,
-				Blob:                    a.Blob,
-				EnableChangePackageName: true,
-			})
-			if err != nil {
-				return err
-			}
-			patches = ps
 			return nil
-		})
-		if err != nil {
-			lastErr = err
-			log.Warn("patch failed", "err", err)
-			continue
 		}
+		if lastErr == nil {
+			lastErr = fmt.Errorf("no versions to try")
+		}
+		return fmt.Errorf("skip %s: %w", job.PackageID, lastErr)
+	}
 
-		pubID := job.PackageID + ".revanced"
-		if err := taskgroup.GoIsolated(ctx, "stage:"+job.PackageID, taskgroup.IO, func(ctx context.Context, s *taskgroup.Status) error {
-			defer s.Unit()()
-			s.Update("stage")
-			if err := fdroid.StageAPK(a.WS.Repo, outPath); err != nil {
-				return err
+	// Serial Map over preferred versions: first full success wins; later versions no-op.
+	var won atomic.Bool
+	type verOutcome struct {
+		err string
+	}
+	outcomes, err := taskgroup.Map[string, verOutcome]{
+		Name:     "versions:" + job.PackageID,
+		Items:    versions,
+		PoolKind: taskgroup.Control,
+		Serial:   true,
+		TaskName: func(_ int, ver string) string { return emptyAsLatest(ver) },
+		Fn: func(ctx context.Context, s *taskgroup.Status, ver string) (verOutcome, error) {
+			s.Update(emptyAsLatest(ver))
+			if won.Load() {
+				return verOutcome{}, nil
 			}
-			return fdroid.WritePatchesMetadata(a.WS.Repo, pubID, patches)
-		}); err != nil {
-			return err
-		}
-		log.Info("package ok", "package", job.PackageID, "apk", outPath)
+			if err := a.processVersion(ctx, job, ver, reg, order); err != nil {
+				log.Warn("version failed", "package", job.PackageID, "version", emptyAsLatest(ver), "err", err)
+				return verOutcome{err: err.Error()}, nil
+			}
+			won.Store(true)
+			return verOutcome{}, nil
+		},
+	}.Run(ctx)
+	if err != nil {
+		return err
+	}
+	if won.Load() {
 		return nil
 	}
-	if lastErr == nil {
-		lastErr = fmt.Errorf("no versions to try")
+	var errs []string
+	for _, o := range outcomes {
+		if o.err != "" {
+			errs = append(errs, o.err)
+		}
 	}
-	return fmt.Errorf("skip %s: %w", job.PackageID, lastErr)
+	if len(errs) == 0 {
+		return fmt.Errorf("skip %s: no versions to try", job.PackageID)
+	}
+	return fmt.Errorf("skip %s: %s", job.PackageID, strings.Join(errs, "; "))
+}
+
+func (a *App) processVersion(ctx context.Context, job revanced.Job, ver string, reg download.Registry, order []string) error {
+	log := logging.GetLogger(ctx)
+	stockPath := a.WS.StockAPKPath(job.PackageID, ver)
+	var res *download.Result
+
+	if workspace.CacheHit(stockPath) {
+		if err := download.AcceptCached(stockPath); err != nil {
+			log.Warn("stock cache rejected", "path", stockPath, "err", err)
+		} else {
+			log.Info("stock cache hit", "path", stockPath)
+			res = &download.Result{Path: stockPath, SourceID: "cache"}
+		}
+	}
+	if res == nil {
+		log.Info("download attempt", "package", job.PackageID, "version", emptyAsLatest(ver))
+		// Map over downloaders (Serial) lives inside FetchFirst.
+		got, err := download.FetchFirst(ctx, reg, order, download.Request{
+			PackageID: job.PackageID,
+			Version:   ver,
+		}, a.WS.StockAPKs)
+		if err != nil {
+			return err
+		}
+		if got.Path != stockPath {
+			if err := os.Rename(got.Path, stockPath); err != nil {
+				b, rerr := os.ReadFile(got.Path)
+				if rerr != nil {
+					return rerr
+				}
+				if werr := os.WriteFile(stockPath, b, 0o644); werr != nil {
+					return werr
+				}
+				_ = os.Remove(got.Path)
+			}
+			got.Path = stockPath
+		}
+		res = got
+	}
+
+	outName := fmt.Sprintf("%s_%s_revanced.apk", sanitize(job.PackageID), sanitize(emptyAsLatest(ver)))
+	outPath := filepath.Join(a.WS.Work, outName)
+	if err := os.MkdirAll(a.WS.Work, 0o755); err != nil {
+		return err
+	}
+
+	var patches []string
+	err := taskgroup.GoIsolated(ctx, "patch:"+job.PackageID, taskgroup.CPU, func(ctx context.Context, s *taskgroup.Status) error {
+		defer s.Unit()()
+		s.Update("revanced-cli")
+		log.Info("patching", "in", res.Path, "out", outPath)
+		ps, err := revanced.Patch(revanced.PatchOptions{
+			CLIJar:                  a.WS.PatcherJAR(),
+			PatchesRVP:              a.WS.PatchesRVP(),
+			InputAPK:                res.Path,
+			OutputAPK:               outPath,
+			KeystorePath:            a.WS.KeystorePath,
+			Blob:                    a.Blob,
+			EnableChangePackageName: true,
+		})
+		if err != nil {
+			return err
+		}
+		patches = ps
+		return nil
+	})
+	if err != nil {
+		return err
+	}
+
+	pubID := job.PackageID + ".revanced"
+	if err := taskgroup.GoIsolated(ctx, "stage:"+job.PackageID, taskgroup.IO, func(ctx context.Context, s *taskgroup.Status) error {
+		defer s.Unit()()
+		s.Update("stage")
+		if err := fdroid.StageAPK(a.WS.Repo, outPath); err != nil {
+			return err
+		}
+		return fdroid.WritePatchesMetadata(a.WS.Repo, pubID, patches)
+	}); err != nil {
+		return err
+	}
+	log.Info("package ok", "package", job.PackageID, "apk", outPath)
+	return nil
 }
 
 // FDroidUpdate runs fdroid update in REPO (IO task when a group is present).
@@ -209,6 +261,13 @@ func (a *App) FDroidUpdate(ctx context.Context, createMeta bool) error {
 		s.Update("fdroid update")
 		return fdroid.Update(a.WS.Repo, a.Blob, createMeta)
 	})
+}
+
+// pkgOutcome is a pure reduce element from the packages Map (no shared mutex).
+type pkgOutcome struct {
+	Package string
+	OK      bool
+	Skip    string // non-empty when soft-skipped
 }
 
 // RunFull is the kitchen-sink pipeline for REPO.
@@ -233,54 +292,56 @@ func (a *App) RunFull(ctx context.Context) error {
 	}
 	log.Info("jobs loaded", "count", len(jobs), "repo", a.WS.Repo, "cache", a.WS.Cache)
 
-	type item struct{ Job revanced.Job }
-	items := make([]item, len(jobs))
-	for i, j := range jobs {
-		items[i] = item{Job: j}
-	}
-
-	var mu sync.Mutex
-	var okPkgs, skipPkgs []string
-
-	err = taskgroup.Each[item]{
+	// Map packages → outcome (soft-skip inside Isolate). Pure reduce after.
+	outcomes, err := taskgroup.Map[revanced.Job, pkgOutcome]{
 		Name:     "packages",
-		Items:    items,
+		Items:    jobs,
 		PoolKind: taskgroup.Control,
-		TaskName: func(_ int, it item) string { return it.Job.PackageID },
-		Fn: func(ctx context.Context, s *taskgroup.Status, it item) error {
-			s.Update(it.Job.PackageID)
+		TaskName: func(_ int, j revanced.Job) string { return j.PackageID },
+		Fn: func(ctx context.Context, s *taskgroup.Status, job revanced.Job) (pkgOutcome, error) {
+			s.Update(job.PackageID)
 			err := taskgroup.Isolate(ctx, func(ctx context.Context) error {
-				return a.ProcessPackage(ctx, it.Job)
+				return a.ProcessPackage(ctx, job)
 			})
-			mu.Lock()
-			defer mu.Unlock()
 			if err != nil {
-				skipPkgs = append(skipPkgs, fmt.Sprintf("%s: %v", it.Job.PackageID, err))
-				logging.GetLogger(ctx).Warn("skip package", "package", it.Job.PackageID, "err", err)
-				return nil // soft-skip
+				logging.GetLogger(ctx).Warn("skip package", "package", job.PackageID, "err", err)
+				return pkgOutcome{Package: job.PackageID, Skip: err.Error()}, nil
 			}
-			okPkgs = append(okPkgs, it.Job.PackageID)
-			return nil
+			return pkgOutcome{Package: job.PackageID, OK: true}, nil
 		},
 	}.Run(ctx)
 	if err != nil {
 		return err
 	}
 
+	var okPkgs, skipPkgs []string
+	for _, o := range outcomes {
+		if o.OK {
+			okPkgs = append(okPkgs, o.Package)
+			continue
+		}
+		if o.Skip != "" {
+			skipPkgs = append(skipPkgs, o.Package+": "+o.Skip)
+		}
+	}
+
+	summarize := func() {
+		log.Info("run summary",
+			"ok", len(okPkgs),
+			"skipped", len(skipPkgs),
+			"ok_packages", strings.Join(okPkgs, ","),
+		)
+		for _, line := range skipPkgs {
+			log.Info("skipped", "detail", line)
+		}
+	}
 	if s := taskgroup.SessionFrom(ctx); s != nil {
 		s.AfterWait(func() error {
-			log.Info("run summary",
-				"ok", len(okPkgs),
-				"skipped", len(skipPkgs),
-				"ok_packages", strings.Join(okPkgs, ","),
-			)
-			for _, line := range skipPkgs {
-				log.Info("skipped", "detail", line)
-			}
+			summarize()
 			return nil
 		})
 	} else {
-		log.Info("run summary", "ok", len(okPkgs), "skipped", len(skipPkgs))
+		summarize()
 	}
 
 	log.Info("running fdroid update", "repo", a.WS.Repo)
@@ -313,25 +374,45 @@ func (a *App) RunSmoke(ctx context.Context, maxOK int) (ok int, err error) {
 	if maxOK <= 0 {
 		maxOK = 1
 	}
+
+	// Filter candidates, then Serial Each until maxOK (stop scheduling via atomic).
+	var candidates []revanced.Job
 	for _, job := range jobs {
-		if ok >= maxOK {
-			break
-		}
 		low := strings.ToLower(job.PackageID)
 		if strings.Contains(low, "youtube") || strings.Contains(low, "photos") {
 			continue
 		}
-		log.Info("smoke try", "package", job.PackageID)
-		err := taskgroup.GoIsolated(ctx, "smoke:"+job.PackageID, taskgroup.Control, func(ctx context.Context, s *taskgroup.Status) error {
-			s.Update(job.PackageID)
-			return a.ProcessPackage(ctx, job)
-		})
-		if err != nil {
-			log.Warn("smoke skip", "package", job.PackageID, "err", err)
-			continue
-		}
-		ok++
+		candidates = append(candidates, job)
 	}
+
+	var okCount atomic.Int64
+	err = taskgroup.Each[revanced.Job]{
+		Name:     "smoke",
+		Items:    candidates,
+		PoolKind: taskgroup.Control,
+		Serial:   true,
+		TaskName: func(_ int, j revanced.Job) string { return j.PackageID },
+		Fn: func(ctx context.Context, s *taskgroup.Status, job revanced.Job) error {
+			if okCount.Load() >= int64(maxOK) {
+				return nil
+			}
+			s.Update(job.PackageID)
+			log.Info("smoke try", "package", job.PackageID)
+			err := taskgroup.Isolate(ctx, func(ctx context.Context) error {
+				return a.ProcessPackage(ctx, job)
+			})
+			if err != nil {
+				log.Warn("smoke skip", "package", job.PackageID, "err", err)
+				return nil
+			}
+			okCount.Add(1)
+			return nil
+		},
+	}.Run(ctx)
+	if err != nil {
+		return 0, err
+	}
+	ok = int(okCount.Load())
 	if ok == 0 {
 		return 0, fmt.Errorf("no package succeeded download+patch (tried %d jobs)", len(jobs))
 	}
