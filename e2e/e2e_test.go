@@ -7,6 +7,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -109,9 +110,10 @@ func TestE2E_RepoCacheLayout(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Logf("smoke packages ok: %d", n)
-	matches, _ := filepath.Glob(filepath.Join(a.WS.FDroidRepo, "index-v1.jar"))
+	// Index is published into live REPO/repo after atomic PublishStage.
+	matches, _ := filepath.Glob(filepath.Join(a.WS.LiveRepoDir(), "index-v1.jar"))
 	if len(matches) == 0 {
-		t.Fatal("expected index-v1.jar after fdroid update")
+		t.Fatal("expected index-v1.jar in REPO/repo after publish")
 	}
 }
 
@@ -133,13 +135,21 @@ func TestE2E_CLI(t *testing.T) {
 	cache := t.TempDir()
 	_ = os.WriteFile(filepath.Join(repo, "revancedbot.yaml"), []byte("repo_name: e2e\n"), 0o644)
 
-	out, err := exec.Command(bin, "keys", "generate").CombinedOutput()
+	// Blob is the only line on stdout; slog hints go to stderr.
+	cmdGen := exec.Command(bin, "keys", "generate")
+	var stdout, stderr []byte
+	var err error
+	stdout, err = cmdGen.Output()
 	if err != nil {
-		t.Fatal(err, string(out))
+		if ee, ok := err.(*exec.ExitError); ok {
+			stderr = ee.Stderr
+		}
+		t.Fatalf("keys generate: %v\nstdout=%s\nstderr=%s", err, stdout, stderr)
 	}
-	// last line blob
-	lines := splitNonEmpty(string(out))
-	blob := lines[len(lines)-1]
+	blob := pickSigningBlob(string(stdout))
+	if blob == "" {
+		t.Fatalf("no signing blob on stdout: %q", stdout)
+	}
 	env := append(os.Environ(), "REVANCEDBOT_SIGNING="+blob)
 
 	run := func(args ...string) {
@@ -170,14 +180,33 @@ func repoRoot(t *testing.T) string {
 	return wd
 }
 
-func splitNonEmpty(s string) []string {
-	var out []string
-	for _, line := range splitLines(s) {
-		if line != "" && line[0] != '#' {
-			out = append(out, line)
+func pickSigningBlob(stdout string) string {
+	// Prefer a long base64-ish line (the secret); ignore empty/log noise.
+	var best string
+	for _, line := range splitLines(stdout) {
+		line = strings.TrimSpace(line)
+		if line == "" || line[0] == '#' {
+			continue
+		}
+		if len(line) > len(best) && looksLikeBlob(line) {
+			best = line
 		}
 	}
-	return out
+	return best
+}
+
+func looksLikeBlob(s string) bool {
+	if len(s) < 80 {
+		return false
+	}
+	for i := 0; i < len(s); i++ {
+		c := s[i]
+		if (c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z') || (c >= '0' && c <= '9') || c == '+' || c == '/' || c == '=' {
+			continue
+		}
+		return false
+	}
+	return true
 }
 
 func splitLines(s string) []string {

@@ -3,6 +3,7 @@ package cli
 import (
 	"context"
 
+	"github.com/lucasew/revancedbot/internal/config"
 	"github.com/lucasew/revancedbot/internal/toolscheck"
 	"github.com/spf13/cobra"
 	"workspaced/pkg/logging"
@@ -12,10 +13,14 @@ import (
 func newFDroidInitCmd() *cobra.Command {
 	return &cobra.Command{
 		Use:   "fdroid-init REPO",
-		Short: "Seed stage, write config in CACHE, atomically publish layout to REPO",
+		Short: "Create REPO if needed, stage config in CACHE, atomically publish layout",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if err := toolscheck.Check(toolscheck.KeysOnly()); err != nil {
+				return err
+			}
+			// Idempotent: mkdir -p REPO so a brand-new path works.
+			if _, err := config.EnsureRepoDir(args[0]); err != nil {
 				return err
 			}
 			a, err := loadApp(cmd, args)

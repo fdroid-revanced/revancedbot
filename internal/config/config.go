@@ -28,8 +28,32 @@ type Config struct {
 	GitHubToken string
 }
 
+// EnsureRepoDir makes sure path exists as a directory (mkdir -p). Idempotent.
+// Used by fdroid-init so `revancedbot fdroid-init ./new-repo` creates the tree.
+func EnsureRepoDir(repo string) (string, error) {
+	repoAbs, err := filepath.Abs(repo)
+	if err != nil {
+		return "", err
+	}
+	st, err := os.Stat(repoAbs)
+	if err == nil {
+		if !st.IsDir() {
+			return "", fmt.Errorf("repo is not a directory: %s", repoAbs)
+		}
+		return repoAbs, nil
+	}
+	if !os.IsNotExist(err) {
+		return "", fmt.Errorf("repo %s: %w", repoAbs, err)
+	}
+	if err := os.MkdirAll(repoAbs, 0o755); err != nil {
+		return "", fmt.Errorf("mkdir repo %s: %w", repoAbs, err)
+	}
+	return repoAbs, nil
+}
+
 // LoadFromRepo loads REPO/revancedbot.yaml (or cfgFile override).
 // cacheFlag empty means caller will mkdtemp.
+// The REPO path must already exist as a directory (use EnsureRepoDir for init).
 func LoadFromRepo(repo, cacheFlag, cfgFile string) (*Config, error) {
 	repoAbs, err := filepath.Abs(repo)
 	if err != nil {
