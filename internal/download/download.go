@@ -10,7 +10,8 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
-	"time"
+
+	"github.com/lucasew/revancedbot/internal/netx"
 )
 
 // Request is a stock APK fetch request.
@@ -108,8 +109,14 @@ func fileSHA256(path string) (string, error) {
 	return hex.EncodeToString(h.Sum(nil)), nil
 }
 
-func defaultHTTPClient() *http.Client {
-	return &http.Client{Timeout: 10 * time.Minute}
+// httpClient returns a progress-aware client for one-shot downloads.
+func httpClient(ctx context.Context) *http.Client {
+	return netx.Client(ctx)
+}
+
+// httpClientJar returns a progress-aware client with cookies (scrapers).
+func httpClientJar(ctx context.Context) *http.Client {
+	return netx.ClientWithJar(ctx)
 }
 
 // browserUA is a desktop Chrome UA; many APK hosts reject library defaults.
@@ -153,3 +160,5 @@ func sanitize(s string) string {
 	}
 	return string(b)
 }
+
+// keep time import used if tests need — actually unused now; remove

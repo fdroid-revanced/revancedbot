@@ -1,6 +1,8 @@
 package cli
 
 import (
+	"fmt"
+
 	"github.com/spf13/cobra"
 )
 
@@ -14,6 +16,7 @@ func newRunCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
+			// RunFull owns Each/GoIsolated (packages, patch, fdroid); no outer Unit shell.
 			return a.RunFull(ctxOf(cmd))
 		},
 	}
@@ -30,11 +33,13 @@ func newSmokeCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			n, err := a.RunSmoke(ctxOf(cmd), maxOK)
+			ctx := ctxOf(cmd)
+			n, err := a.RunSmoke(ctx, maxOK)
 			if err != nil {
 				return err
 			}
-			cmd.Printf("smoke ok: %d package(s) patched; fdroid updated\n", n)
+			// Prefer print after tasks; smoke already finished before return.
+			fmt.Printf("smoke ok: %d package(s) patched; fdroid updated\n", n)
 			return nil
 		},
 	}

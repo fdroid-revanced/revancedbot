@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
+	"runtime"
 	"sync"
 
 	"github.com/lucasew/revancedbot/internal/app"
@@ -32,9 +33,10 @@ func NewRoot() *cobra.Command {
 		SilenceErrors: true,
 		Version:       version.Version,
 		PersistentPreRunE: func(cmd *cobra.Command, args []string) error {
-			h := slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelInfo})
+			h := logging.NewPlainHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelInfo})
 			ctx := logging.NewRootContext(slog.New(h))
-			sess, ctx := taskgroup.Enter(ctx, taskgroup.DefaultLimits())
+			limits := limitsFromArgs(args)
+			sess, ctx := taskgroup.Enter(ctx, limits)
 			sessionMu.Lock()
 			session = sess
 			sessionMu.Unlock()
@@ -70,6 +72,39 @@ func NewRoot() *cobra.Command {
 	return root
 }
 
+// limitsFromArgs loads pool_* from REPO/revancedbot.yaml when args[0] is a repo path.
+// Unspecified pools use taskgroup defaults.
+func limitsFromArgs(args []string) taskgroup.Limits {
+	limits := taskgroup.DefaultLimits()
+	if len(args) < 1 {
+		return limits
+	}
+	cfg, err := config.LoadFromRepo(args[0], cacheFlag, cfgFile)
+	if err != nil {
+		return limits
+	}
+	return poolsFromConfig(cfg)
+}
+
+func poolsFromConfig(cfg *config.Config) taskgroup.Limits {
+	limits := taskgroup.DefaultLimits()
+	if cfg == nil {
+		return limits
+	}
+	if cfg.PoolIO > 0 {
+		limits.IO = cfg.PoolIO
+	}
+	if cfg.PoolCPU > 0 {
+		limits.CPU = cfg.PoolCPU
+	} else {
+		limits.CPU = max(runtime.NumCPU(), 1)
+	}
+	if cfg.PoolInternet > 0 {
+		limits.Internet = cfg.PoolInternet
+	}
+	return limits
+}
+
 func loadApp(cmd *cobra.Command, args []string) (*app.App, error) {
 	if len(args) < 1 {
 		return nil, fmt.Errorf("missing REPO path (F-Droid simple-binary root)")
@@ -90,4 +125,20 @@ func ctxOf(cmd *cobra.Command) context.Context {
 		ctx = logging.ContextWithLogger(ctx, slog.Default())
 	}
 	return ctx
+}
+
+// schedule runs fn as a named task. Session.Close waits; return nil from RunE.
+func schedule(ctx context.Context, name string, pool taskgroup.PoolKind, fn func(context.Context, *taskgroup.Status) error) error {
+	g := taskgroup.MustFromContext(ctx)
+	g.Go(name, pool, fn)
+	return nil
+}
+
+// afterWait registers a hook to run after tasks finish (stdout prints, etc.).
+func afterWait(ctx context.Context, fn func() error) {
+	if s := taskgroup.SessionFrom(ctx); s != nil {
+		s.AfterWait(fn)
+	} else if fn != nil {
+		_ = fn()
+	}
 }

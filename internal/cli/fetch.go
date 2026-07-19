@@ -1,9 +1,11 @@
 package cli
 
 import (
-	"github.com/lucasew/revancedbot/internal/toolscheck"
+	"context"
+
 	"github.com/spf13/cobra"
 	"workspaced/pkg/logging"
+	"workspaced/pkg/taskgroup"
 )
 
 func newFetchToolsCmd() *cobra.Command {
@@ -12,22 +14,23 @@ func newFetchToolsCmd() *cobra.Command {
 		Short: "Download latest ReVanced CLI jar and patches into CACHE",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			// java not strictly required to download
-			_ = toolscheck.Check
 			a, err := loadApp(cmd, args)
 			if err != nil {
 				return err
 			}
 			ctx := ctxOf(cmd)
-			if err := a.FetchTools(ctx); err != nil {
-				return err
-			}
-			logging.GetLogger(ctx).Info("tools ready",
-				"cli", a.WS.PatcherJAR(),
-				"patches", a.WS.PatchesRVP(),
-				"cache", a.WS.Cache,
-			)
-			return nil
+			return schedule(ctx, "fetch-tools", taskgroup.Control, func(ctx context.Context, s *taskgroup.Status) error {
+				s.Update("tools")
+				if err := a.FetchTools(ctx); err != nil {
+					return err
+				}
+				logging.GetLogger(ctx).Info("tools ready",
+					"cli", a.WS.PatcherJAR(),
+					"patches", a.WS.PatchesRVP(),
+					"cache", a.WS.Cache,
+				)
+				return nil
+			})
 		},
 	}
 }

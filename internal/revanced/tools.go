@@ -11,6 +11,7 @@ import (
 	"strings"
 
 	"github.com/google/go-github/v69/github"
+	"github.com/lucasew/revancedbot/internal/netx"
 	"golang.org/x/oauth2"
 )
 
@@ -217,14 +218,17 @@ func downloadLatestGitHubAsset(ctx context.Context, client *github.Client, owner
 }
 
 func downloadGitHubAsset(ctx context.Context, client *github.Client, owner, repo string, asset *github.ReleaseAsset, dest string) error {
+	// Prefer browser download URL through fetchurl (progress-aware).
+	if u := asset.GetBrowserDownloadURL(); u != "" {
+		if err := downloadURL(ctx, u, dest); err == nil {
+			return nil
+		}
+	}
 	if err := os.MkdirAll(filepath.Dir(dest), 0o755); err != nil {
 		return err
 	}
-	rc, _, err := client.Repositories.DownloadReleaseAsset(ctx, owner, repo, asset.GetID(), http.DefaultClient)
+	rc, _, err := client.Repositories.DownloadReleaseAsset(ctx, owner, repo, asset.GetID(), netx.Client(ctx))
 	if err != nil {
-		if u := asset.GetBrowserDownloadURL(); u != "" {
-			return downloadURL(ctx, u, dest)
-		}
 		return err
 	}
 	defer rc.Close()
@@ -233,18 +237,33 @@ func downloadGitHubAsset(ctx context.Context, client *github.Client, owner, repo
 		return err
 	}
 	defer f.Close()
-	_, err = io.Copy(f, rc)
-	return err
+	n, err := io.Copy(f, rc)
+	if err != nil {
+		return err
+	}
+	if n < 1024 {
+		_ = os.Remove(dest)
+		return fmt.Errorf("github asset too small (%d bytes)", n)
+	}
+	return nil
 }
 
 func downloadURL(ctx context.Context, url, dest string) error {
+	// Known-URL asset path: fetchurl driver (+ httpclient progress).
+	if err := netx.FetchURLs(ctx, []string{url}, dest, "", ""); err != nil {
+		// Fallback: direct GET with progress client (e.g. drivers not registered in tests).
+		return downloadURLDirect(ctx, url, dest)
+	}
+	return nil
+}
+
+func downloadURLDirect(ctx context.Context, url, dest string) error {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
 	if err != nil {
 		return err
 	}
-	// SourceForge and some mirrors need a browser-like UA.
 	req.Header.Set("User-Agent", "revancedbot/1.0 (+https://github.com/lucasew/revancedbot)")
-	resp, err := http.DefaultClient.Do(req)
+	resp, err := netx.Client(ctx).Do(req)
 	if err != nil {
 		return err
 	}

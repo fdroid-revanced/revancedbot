@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"io"
 	"net/http"
-	"net/http/cookiejar"
 	"net/url"
 	"os"
 	"path/filepath"
@@ -24,24 +23,18 @@ type APKMirror struct {
 
 func (a *APKMirror) ID() string { return "apkmirror" }
 
-func (a *APKMirror) client() *http.Client {
+func (a *APKMirror) client(ctx context.Context) *http.Client {
 	if a.Client != nil {
 		return a.Client
 	}
-	jar, _ := cookiejar.New(nil)
-	c := defaultHTTPClient()
-	// clone defaults with cookie jar for multi-step scrape
-	return &http.Client{
-		Timeout: c.Timeout,
-		Jar:     jar,
-	}
+	return httpClientJar(ctx)
 }
 
 func (a *APKMirror) Fetch(ctx context.Context, req Request, destDir string) (*Result, error) {
 	if strings.TrimSpace(req.PackageID) == "" {
 		return nil, fmt.Errorf("package id required")
 	}
-	cl := a.client()
+	cl := a.client(ctx)
 
 	releasePath, err := a.findRelease(ctx, cl, req)
 	if err != nil {

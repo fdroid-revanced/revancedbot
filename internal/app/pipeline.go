@@ -5,8 +5,8 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"runtime"
 	"strings"
+	"sync"
 
 	"github.com/lucasew/revancedbot/internal/config"
 	"github.com/lucasew/revancedbot/internal/download"
@@ -35,7 +35,6 @@ func New(cfg *config.Config) (*App, error) {
 	if err := ws.Ensure(); err != nil {
 		return nil, err
 	}
-	// Reflect resolved cache path (including mkdtemp).
 	cfg.Cache = ws.Cache
 	return &App{Cfg: cfg, WS: ws}, nil
 }
@@ -81,7 +80,6 @@ func (a *App) FetchTools(ctx context.Context) error {
 		return nil
 	}
 	log.Info("fetching ReVanced CLI and patches into cache", "cache", a.WS.Cache)
-	// Always re-fetch both if either missing (simplicity).
 	return revanced.FetchLatest(ctx, a.Cfg.GitHubToken, cli, rvp)
 }
 
@@ -117,7 +115,6 @@ func (a *App) ProcessPackage(ctx context.Context, job revanced.Job) error {
 		if workspace.CacheHit(stockPath) {
 			if err := download.AcceptCached(stockPath); err != nil {
 				log.Warn("stock cache rejected", "path", stockPath, "err", err)
-				// fall through to re-download
 			} else {
 				log.Info("stock cache hit", "path", stockPath)
 				res = &download.Result{Path: stockPath, SourceID: "cache"}
@@ -125,7 +122,6 @@ func (a *App) ProcessPackage(ctx context.Context, job revanced.Job) error {
 		}
 		if res == nil {
 			log.Info("download attempt", "package", job.PackageID, "version", emptyAsLatest(ver))
-			// Prefer writing to the naive cache path name.
 			got, err := download.FetchFirst(ctx, reg, order, download.Request{
 				PackageID: job.PackageID,
 				Version:   ver,
@@ -135,10 +131,8 @@ func (a *App) ProcessPackage(ctx context.Context, job revanced.Job) error {
 				log.Warn("download failed", "err", err)
 				continue
 			}
-			// Normalize to stock cache name if downloader used a different name.
 			if got.Path != stockPath {
 				if err := os.Rename(got.Path, stockPath); err != nil {
-					// copy fallback
 					b, rerr := os.ReadFile(got.Path)
 					if rerr != nil {
 						lastErr = rerr
@@ -158,26 +152,42 @@ func (a *App) ProcessPackage(ctx context.Context, job revanced.Job) error {
 		outName := fmt.Sprintf("%s_%s_revanced.apk", sanitize(job.PackageID), sanitize(emptyAsLatest(ver)))
 		outPath := filepath.Join(a.WS.Work, outName)
 		_ = os.MkdirAll(a.WS.Work, 0o755)
-		log.Info("patching", "in", res.Path, "out", outPath)
-		patches, err := revanced.Patch(revanced.PatchOptions{
-			CLIJar:                  a.WS.PatcherJAR(),
-			PatchesRVP:              a.WS.PatchesRVP(),
-			InputAPK:                res.Path,
-			OutputAPK:               outPath,
-			KeystorePath:            a.WS.KeystorePath,
-			Blob:                    a.Blob,
-			EnableChangePackageName: true,
+
+		var patches []string
+		err := taskgroup.GoIsolated(ctx, "patch:"+job.PackageID, taskgroup.CPU, func(ctx context.Context, s *taskgroup.Status) error {
+			defer s.Unit()()
+			s.Update("revanced-cli")
+			log.Info("patching", "in", res.Path, "out", outPath)
+			ps, err := revanced.Patch(revanced.PatchOptions{
+				CLIJar:                  a.WS.PatcherJAR(),
+				PatchesRVP:              a.WS.PatchesRVP(),
+				InputAPK:                res.Path,
+				OutputAPK:               outPath,
+				KeystorePath:            a.WS.KeystorePath,
+				Blob:                    a.Blob,
+				EnableChangePackageName: true,
+			})
+			if err != nil {
+				return err
+			}
+			patches = ps
+			return nil
 		})
 		if err != nil {
 			lastErr = err
 			log.Warn("patch failed", "err", err)
 			continue
 		}
+
 		pubID := job.PackageID + ".revanced"
-		if err := fdroid.StageAPK(a.WS.Repo, outPath); err != nil {
-			return err
-		}
-		if err := fdroid.WritePatchesMetadata(a.WS.Repo, pubID, patches); err != nil {
+		if err := taskgroup.GoIsolated(ctx, "stage:"+job.PackageID, taskgroup.IO, func(ctx context.Context, s *taskgroup.Status) error {
+			defer s.Unit()()
+			s.Update("stage")
+			if err := fdroid.StageAPK(a.WS.Repo, outPath); err != nil {
+				return err
+			}
+			return fdroid.WritePatchesMetadata(a.WS.Repo, pubID, patches)
+		}); err != nil {
 			return err
 		}
 		log.Info("package ok", "package", job.PackageID, "apk", outPath)
@@ -189,12 +199,16 @@ func (a *App) ProcessPackage(ctx context.Context, job revanced.Job) error {
 	return fmt.Errorf("skip %s: %w", job.PackageID, lastErr)
 }
 
-// FDroidUpdate runs fdroid update in REPO.
-func (a *App) FDroidUpdate(createMeta bool) error {
+// FDroidUpdate runs fdroid update in REPO (IO task when a group is present).
+func (a *App) FDroidUpdate(ctx context.Context, createMeta bool) error {
 	if a.Blob == nil {
 		return fmt.Errorf("signing not loaded")
 	}
-	return fdroid.Update(a.WS.Repo, a.Blob, createMeta)
+	return taskgroup.GoIsolated(ctx, "fdroid-update", taskgroup.IO, func(ctx context.Context, s *taskgroup.Status) error {
+		defer s.Unit()()
+		s.Update("fdroid update")
+		return fdroid.Update(a.WS.Repo, a.Blob, createMeta)
+	})
 }
 
 // RunFull is the kitchen-sink pipeline for REPO.
@@ -219,39 +233,33 @@ func (a *App) RunFull(ctx context.Context) error {
 	}
 	log.Info("jobs loaded", "count", len(jobs), "repo", a.WS.Repo, "cache", a.WS.Cache)
 
-	limits := taskgroup.DefaultLimits()
-	if a.Cfg.PoolIO > 0 {
-		limits.IO = a.Cfg.PoolIO
-	}
-	if a.Cfg.PoolCPU > 0 {
-		limits.CPU = a.Cfg.PoolCPU
-	} else {
-		limits.CPU = max(runtime.NumCPU(), 1)
-	}
-	if a.Cfg.PoolInternet > 0 {
-		limits.Internet = a.Cfg.PoolInternet
-	}
-	_ = limits // pools applied by existing session; optional re-enter not needed
-
 	type item struct{ Job revanced.Job }
 	items := make([]item, len(jobs))
 	for i, j := range jobs {
 		items[i] = item{Job: j}
 	}
 
+	var mu sync.Mutex
+	var okPkgs, skipPkgs []string
+
 	err = taskgroup.Each[item]{
 		Name:     "packages",
 		Items:    items,
-		PoolKind: taskgroup.Internet,
+		PoolKind: taskgroup.Control,
 		TaskName: func(_ int, it item) string { return it.Job.PackageID },
 		Fn: func(ctx context.Context, s *taskgroup.Status, it item) error {
 			s.Update(it.Job.PackageID)
 			err := taskgroup.Isolate(ctx, func(ctx context.Context) error {
 				return a.ProcessPackage(ctx, it.Job)
 			})
+			mu.Lock()
+			defer mu.Unlock()
 			if err != nil {
+				skipPkgs = append(skipPkgs, fmt.Sprintf("%s: %v", it.Job.PackageID, err))
 				logging.GetLogger(ctx).Warn("skip package", "package", it.Job.PackageID, "err", err)
+				return nil // soft-skip
 			}
+			okPkgs = append(okPkgs, it.Job.PackageID)
 			return nil
 		},
 	}.Run(ctx)
@@ -259,8 +267,24 @@ func (a *App) RunFull(ctx context.Context) error {
 		return err
 	}
 
+	if s := taskgroup.SessionFrom(ctx); s != nil {
+		s.AfterWait(func() error {
+			log.Info("run summary",
+				"ok", len(okPkgs),
+				"skipped", len(skipPkgs),
+				"ok_packages", strings.Join(okPkgs, ","),
+			)
+			for _, line := range skipPkgs {
+				log.Info("skipped", "detail", line)
+			}
+			return nil
+		})
+	} else {
+		log.Info("run summary", "ok", len(okPkgs), "skipped", len(skipPkgs))
+	}
+
 	log.Info("running fdroid update", "repo", a.WS.Repo)
-	if err := a.FDroidUpdate(true); err != nil {
+	if err := a.FDroidUpdate(ctx, true); err != nil {
 		return err
 	}
 	log.Info("done", "repo", a.WS.Repo)
@@ -293,13 +317,16 @@ func (a *App) RunSmoke(ctx context.Context, maxOK int) (ok int, err error) {
 		if ok >= maxOK {
 			break
 		}
-		// Prefer non-huge packages
 		low := strings.ToLower(job.PackageID)
 		if strings.Contains(low, "youtube") || strings.Contains(low, "photos") {
 			continue
 		}
 		log.Info("smoke try", "package", job.PackageID)
-		if err := a.ProcessPackage(ctx, job); err != nil {
+		err := taskgroup.GoIsolated(ctx, "smoke:"+job.PackageID, taskgroup.Control, func(ctx context.Context, s *taskgroup.Status) error {
+			s.Update(job.PackageID)
+			return a.ProcessPackage(ctx, job)
+		})
+		if err != nil {
 			log.Warn("smoke skip", "package", job.PackageID, "err", err)
 			continue
 		}
@@ -308,7 +335,7 @@ func (a *App) RunSmoke(ctx context.Context, maxOK int) (ok int, err error) {
 	if ok == 0 {
 		return 0, fmt.Errorf("no package succeeded download+patch (tried %d jobs)", len(jobs))
 	}
-	if err := a.FDroidUpdate(true); err != nil {
+	if err := a.FDroidUpdate(ctx, true); err != nil {
 		return ok, err
 	}
 	return ok, nil

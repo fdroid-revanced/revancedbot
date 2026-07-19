@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/lucasew/revancedbot/internal/app"
+	_ "github.com/lucasew/revancedbot/internal/drivers"
 	"github.com/lucasew/revancedbot/internal/config"
 	"github.com/lucasew/revancedbot/internal/signing"
 	"github.com/lucasew/revancedbot/internal/toolscheck"

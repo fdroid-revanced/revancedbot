@@ -5,6 +5,7 @@ import (
 	"os"
 
 	"github.com/lucasew/revancedbot/internal/cli"
+	_ "github.com/lucasew/revancedbot/internal/drivers"
 )
 
 func main() {

@@ -1,10 +1,12 @@
 package cli
 
 import (
+	"context"
 	"fmt"
 
 	"github.com/lucasew/revancedbot/internal/toolscheck"
 	"github.com/spf13/cobra"
+	"workspaced/pkg/taskgroup"
 )
 
 func newFDroidInitCmd() *cobra.Command {
@@ -20,16 +22,24 @@ func newFDroidInitCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			if err := a.LoadSigning(); err != nil {
-				return err
-			}
-			if err := a.WriteFDroidConfig(); err != nil {
-				return err
-			}
-			fmt.Println("repo:", a.WS.Repo)
-			fmt.Println("config:", a.WS.FDroidConfig())
-			fmt.Println("keystore (cache):", a.WS.KeystorePath)
-			return nil
+			ctx := ctxOf(cmd)
+			return schedule(ctx, "fdroid-init", taskgroup.IO, func(ctx context.Context, s *taskgroup.Status) error {
+				defer s.Unit()()
+				s.Update("config")
+				if err := a.LoadSigning(); err != nil {
+					return err
+				}
+				if err := a.WriteFDroidConfig(); err != nil {
+					return err
+				}
+				afterWait(ctx, func() error {
+					fmt.Println("repo:", a.WS.Repo)
+					fmt.Println("config:", a.WS.FDroidConfig())
+					fmt.Println("keystore (cache):", a.WS.KeystorePath)
+					return nil
+				})
+				return nil
+			})
 		},
 	}
 }
@@ -48,13 +58,17 @@ func newFDroidUpdateCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			if err := a.LoadSigning(); err != nil {
-				return err
-			}
-			if err := a.WriteFDroidConfig(); err != nil {
-				return err
-			}
-			return a.FDroidUpdate(createMeta)
+			ctx := ctxOf(cmd)
+			return schedule(ctx, "fdroid-update-cmd", taskgroup.Control, func(ctx context.Context, s *taskgroup.Status) error {
+				s.Update("setup")
+				if err := a.LoadSigning(); err != nil {
+					return err
+				}
+				if err := a.WriteFDroidConfig(); err != nil {
+					return err
+				}
+				return a.FDroidUpdate(ctx, createMeta)
+			})
 		},
 	}
 	c.Flags().BoolVarP(&createMeta, "create-metadata", "c", true, "pass -c to fdroid update")

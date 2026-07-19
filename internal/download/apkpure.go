@@ -16,11 +16,11 @@ type APKPure struct {
 
 func (a *APKPure) ID() string { return "apkpure" }
 
-func (a *APKPure) client() *http.Client {
+func (a *APKPure) client(ctx context.Context) *http.Client {
 	if a.Client != nil {
 		return a.Client
 	}
-	return defaultHTTPClient()
+	return httpClient(ctx)
 }
 
 func (a *APKPure) Fetch(ctx context.Context, req Request, destDir string) (*Result, error) {
@@ -28,7 +28,6 @@ func (a *APKPure) Fetch(ctx context.Context, req Request, destDir string) (*Resu
 	if ver == "" {
 		ver = "latest"
 	}
-	// Historical direct URL used by the prototype. May require browser fallback later.
 	url := fmt.Sprintf("https://d.apkpure.com/b/APK/%s?version=%s", req.PackageID, ver)
 
 	httpReq, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
@@ -37,7 +36,7 @@ func (a *APKPure) Fetch(ctx context.Context, req Request, destDir string) (*Resu
 	}
 	httpReq.Header.Set("User-Agent", browserUA)
 
-	resp, err := a.client().Do(httpReq)
+	resp, err := a.client(ctx).Do(httpReq)
 	if err != nil {
 		return nil, err
 	}

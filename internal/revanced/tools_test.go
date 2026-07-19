@@ -6,13 +6,16 @@ import (
 	"path/filepath"
 	"testing"
 	"time"
+
+	_ "github.com/lucasew/revancedbot/internal/drivers"
+	"workspaced/pkg/logging"
 )
 
 func TestFetchPatches_FromMirror(t *testing.T) {
 	if os.Getenv("REVANCEDBOT_SKIP_NETWORK") == "1" {
 		t.Skip("network disabled")
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Minute)
+	ctx, cancel := context.WithTimeout(logging.NewWriterContext(t.Output()), 3*time.Minute)
 	defer cancel()
 	dest := filepath.Join(t.TempDir(), "patches.rvp")
 	if err := FetchPatches(ctx, os.Getenv("GITHUB_TOKEN"), dest); err != nil {
