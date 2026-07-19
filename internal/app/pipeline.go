@@ -317,6 +317,11 @@ func (a *App) RunFull(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
+	// Shuffle so rate limits (403/429) and early aborts don't always starve the
+	// same packages; over many runs every app gets a fair shot at updates.
+	rand.Shuffle(len(jobs), func(i, j int) {
+		jobs[i], jobs[j] = jobs[j], jobs[i]
+	})
 	log.Info("jobs loaded", "count", len(jobs), "repo", a.WS.Repo, "cache", a.WS.Cache)
 
 	// One aggregate bar for all package APK work. Pure reduce after soft-skips.
