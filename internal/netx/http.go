@@ -7,9 +7,9 @@ import (
 	"net/http/cookiejar"
 	"time"
 
-	"workspaced/pkg/driver"
-	"workspaced/pkg/driver/httpclient"
-	"workspaced/pkg/logging"
+	"github.com/lucasew/workspaced/pkg/driver"
+	"github.com/lucasew/workspaced/pkg/driver/httpclient"
+	"github.com/lucasew/workspaced/pkg/logging"
 )
 
 // WithLabel sets a human-readable progress task name for HTTP work under ctx.

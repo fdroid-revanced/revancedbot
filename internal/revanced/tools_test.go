@@ -8,7 +8,7 @@ import (
 	"time"
 
 	_ "github.com/lucasew/revancedbot/internal/drivers"
-	"workspaced/pkg/logging"
+	"github.com/lucasew/workspaced/pkg/logging"
 )
 
 func TestFetchPatches_FromMirror(t *testing.T) {

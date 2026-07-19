@@ -17,8 +17,8 @@ import (
 	"github.com/lucasew/revancedbot/internal/signing"
 	"github.com/lucasew/revancedbot/internal/toolscheck"
 	"github.com/lucasew/revancedbot/internal/workspace"
-	"workspaced/pkg/logging"
-	"workspaced/pkg/taskgroup"
+	"github.com/lucasew/workspaced/pkg/logging"
+	"github.com/lucasew/workspaced/pkg/taskgroup"
 )
 
 // App wires config + layout for CLI commands.

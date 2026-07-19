@@ -7,8 +7,8 @@ import (
 
 	"github.com/lucasew/revancedbot/internal/revanced"
 	"github.com/spf13/cobra"
-	"workspaced/pkg/logging"
-	"workspaced/pkg/taskgroup"
+	"github.com/lucasew/workspaced/pkg/logging"
+	"github.com/lucasew/workspaced/pkg/taskgroup"
 )
 
 func newListJobsCmd() *cobra.Command {

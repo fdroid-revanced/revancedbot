@@ -7,8 +7,8 @@ import (
 	"github.com/lucasew/revancedbot/internal/download"
 	"github.com/lucasew/revancedbot/internal/workspace"
 	"github.com/spf13/cobra"
-	"workspaced/pkg/logging"
-	"workspaced/pkg/taskgroup"
+	"github.com/lucasew/workspaced/pkg/logging"
+	"github.com/lucasew/workspaced/pkg/taskgroup"
 )
 
 func newDownloadCmd() *cobra.Command {

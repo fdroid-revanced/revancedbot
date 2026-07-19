@@ -12,7 +12,7 @@ import (
 	"strings"
 
 	"github.com/lucasew/revancedbot/internal/netx"
-	"workspaced/pkg/logging"
+	"github.com/lucasew/workspaced/pkg/logging"
 )
 
 // Request is a stock APK fetch request.

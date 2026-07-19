@@ -2,7 +2,7 @@ package cli
 
 import (
 	"github.com/spf13/cobra"
-	"workspaced/pkg/logging"
+	"github.com/lucasew/workspaced/pkg/logging"
 )
 
 func newRunCmd() *cobra.Command {

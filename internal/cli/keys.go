@@ -6,7 +6,7 @@ import (
 	"github.com/lucasew/revancedbot/internal/signing"
 	"github.com/lucasew/revancedbot/internal/toolscheck"
 	"github.com/spf13/cobra"
-	"workspaced/pkg/logging"
+	"github.com/lucasew/workspaced/pkg/logging"
 )
 
 func newKeysCmd() *cobra.Command {

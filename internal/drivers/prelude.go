@@ -4,7 +4,7 @@ package drivers
 
 import (
 	// Progress-aware HTTP (WithProgress on Transport).
-	_ "workspaced/pkg/driver/httpclient/native"
+	_ "github.com/lucasew/workspaced/pkg/driver/httpclient/native"
 	// Known-URL downloads (uses httpclient under the hood).
-	_ "workspaced/pkg/driver/fetchurl/fetchurl"
+	_ "github.com/lucasew/workspaced/pkg/driver/fetchurl/fetchurl"
 )

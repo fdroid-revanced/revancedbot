@@ -6,8 +6,8 @@ import (
 	"github.com/lucasew/revancedbot/internal/config"
 	"github.com/lucasew/revancedbot/internal/toolscheck"
 	"github.com/spf13/cobra"
-	"workspaced/pkg/logging"
-	"workspaced/pkg/taskgroup"
+	"github.com/lucasew/workspaced/pkg/logging"
+	"github.com/lucasew/workspaced/pkg/taskgroup"
 )
 
 func newFDroidInitCmd() *cobra.Command {

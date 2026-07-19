@@ -4,10 +4,10 @@ go 1.25.6
 
 require (
 	github.com/google/go-github/v69 v69.2.0
+	github.com/lucasew/workspaced v0.0.0-20260719201121-40048e822f06
 	github.com/spf13/cobra v1.10.2
 	github.com/spf13/viper v1.21.0
 	golang.org/x/oauth2 v0.30.0
-	workspaced v0.0.0-20260719185422-87ff8d492e2e
 )
 
 require (
@@ -20,7 +20,7 @@ require (
 	github.com/charmbracelet/x/windows v0.2.2 // indirect
 	github.com/clipperhouse/displaywidth v0.11.0 // indirect
 	github.com/clipperhouse/uax29/v2 v2.7.0 // indirect
-	github.com/fetchurl/fetchurl v0.0.0-20260718231634-c10f1c023ee9 // indirect
+	github.com/fetchurl/fetchurl v0.0.0-20260714002336-2d69880d6c8b // indirect
 	github.com/fsnotify/fsnotify v1.9.0 // indirect
 	github.com/go-viper/mapstructure/v2 v2.4.0 // indirect
 	github.com/google/go-querystring v1.1.0 // indirect
@@ -44,5 +44,3 @@ require (
 	golang.org/x/sys v0.46.0 // indirect
 	golang.org/x/text v0.38.0 // indirect
 )
-
-replace workspaced => github.com/lucasew/workspaced v0.0.0-20260719185422-87ff8d492e2e

@@ -16,7 +16,7 @@ import (
 	_ "github.com/lucasew/revancedbot/internal/drivers"
 	"github.com/lucasew/revancedbot/internal/signing"
 	"github.com/lucasew/revancedbot/internal/toolscheck"
-	"workspaced/pkg/logging"
+	"github.com/lucasew/workspaced/pkg/logging"
 )
 
 // TestE2E_RepoCacheLayout exercises REPO + CACHE + tools + list-jobs + fdroid-init.

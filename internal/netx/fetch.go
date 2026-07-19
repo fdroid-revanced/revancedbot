@@ -6,9 +6,9 @@ import (
 	"os"
 	"path/filepath"
 
-	"workspaced/pkg/driver"
-	"workspaced/pkg/driver/fetchurl"
-	"workspaced/pkg/logging"
+	"github.com/lucasew/workspaced/pkg/driver"
+	"github.com/lucasew/workspaced/pkg/driver/fetchurl"
+	"github.com/lucasew/workspaced/pkg/logging"
 )
 
 // FetchURLs downloads the first successful URL into dest via the fetchurl driver
