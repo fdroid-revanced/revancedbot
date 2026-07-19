@@ -1,8 +1,8 @@
 package cli
 
 import (
-	"github.com/spf13/cobra"
 	"github.com/lucasew/workspaced/pkg/logging"
+	"github.com/spf13/cobra"
 )
 
 func newRunCmd() *cobra.Command {
@@ -25,7 +25,7 @@ func newSmokeCmd() *cobra.Command {
 	var maxOK int
 	c := &cobra.Command{
 		Use:   "smoke REPO",
-		Short: "Try packages until N succeed, then fdroid update (TMP e2e helper)",
+		Short: "Try packages in random order until N succeed, then fdroid update",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			a, err := loadApp(cmd, args)

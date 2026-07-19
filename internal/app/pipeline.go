@@ -3,6 +3,7 @@ package app
 import (
 	"context"
 	"fmt"
+	"math/rand"
 	"os"
 	"path/filepath"
 	"strings"
@@ -405,7 +406,8 @@ func (a *App) RunSmoke(ctx context.Context, maxOK int) (ok int, err error) {
 		maxOK = 1
 	}
 
-	// Filter candidates, then Serial Each until maxOK (stop scheduling via atomic).
+	// Filter candidates, shuffle so each smoke run picks a different starting app,
+	// then Serial Each until maxOK succeed (stop scheduling via atomic).
 	var candidates []revanced.Job
 	for _, job := range jobs {
 		low := strings.ToLower(job.PackageID)
@@ -413,6 +415,12 @@ func (a *App) RunSmoke(ctx context.Context, maxOK int) (ok int, err error) {
 			continue
 		}
 		candidates = append(candidates, job)
+	}
+	rand.Shuffle(len(candidates), func(i, j int) {
+		candidates[i], candidates[j] = candidates[j], candidates[i]
+	})
+	if len(candidates) > 0 {
+		log.Info("smoke order", "first", candidates[0].PackageID, "candidates", len(candidates), "max_ok", maxOK)
 	}
 
 	var okCount atomic.Int64
