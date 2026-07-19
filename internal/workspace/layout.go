@@ -7,7 +7,8 @@ import (
 )
 
 // Layout splits durable F-Droid REPO from disposable CACHE.
-// REPO never holds tools, stock APKs, keystore, or work temps.
+// REPO is only updated via atomic publish from CACHE/fdroid (stage).
+// Tools, stock APKs, keystore, patch work, and the F-Droid build tree live in CACHE.
 type Layout struct {
 	Repo  string
 	Cache string
@@ -18,14 +19,15 @@ type Layout struct {
 	Signing      string
 	KeystorePath string
 	Work         string
+	Stage        string // CACHE/fdroid — full F-Droid tree being built
+	Shims        string // CACHE/shims — apksigner wrappers for fdroid
 
-	// Repo subdirs (F-Droid simple binary)
-	FDroidRepo string
-	FDroidMeta string
+	// Stage subdirs (writes during run; not live REPO)
+	StageRepo string
+	StageMeta string
 }
 
 // New builds a layout. cache may be empty → MkdirTemp.
-// If cache is created via MkdirTemp, the caller owns cleanup if desired.
 func New(repo, cache string) (*Layout, error) {
 	repoAbs, err := filepath.Abs(repo)
 	if err != nil {
@@ -43,6 +45,7 @@ func New(repo, cache string) (*Layout, error) {
 			return nil, err
 		}
 	}
+	stage := filepath.Join(cacheAbs, "fdroid")
 	l := &Layout{
 		Repo:         repoAbs,
 		Cache:        cacheAbs,
@@ -51,15 +54,17 @@ func New(repo, cache string) (*Layout, error) {
 		Signing:      filepath.Join(cacheAbs, "signing"),
 		KeystorePath: filepath.Join(cacheAbs, "signing", "keystore.jks"),
 		Work:         filepath.Join(cacheAbs, "work"),
-		FDroidRepo:   filepath.Join(repoAbs, "repo"),
-		FDroidMeta:   filepath.Join(repoAbs, "metadata"),
+		Stage:        stage,
+		Shims:        filepath.Join(cacheAbs, "shims"),
+		StageRepo:    filepath.Join(stage, "repo"),
+		StageMeta:    filepath.Join(stage, "metadata"),
 	}
 	return l, nil
 }
 
-// Ensure creates required directories (cache always; repo/metadata/repo always).
+// Ensure creates CACHE directories (including empty stage). Does not create live REPO/repo.
 func (l *Layout) Ensure() error {
-	for _, d := range []string{l.Tools, l.StockAPKs, l.Signing, l.Work, l.Repo, l.FDroidRepo, l.FDroidMeta} {
+	for _, d := range []string{l.Tools, l.StockAPKs, l.Signing, l.Work, l.Stage, l.StageRepo, l.StageMeta, l.Shims} {
 		if err := os.MkdirAll(d, 0o755); err != nil {
 			return fmt.Errorf("mkdir %s: %w", d, err)
 		}
@@ -67,10 +72,25 @@ func (l *Layout) Ensure() error {
 	return nil
 }
 
-func (l *Layout) PatcherJAR() string   { return filepath.Join(l.Tools, "revanced-cli.jar") }
-func (l *Layout) PatchesRVP() string   { return filepath.Join(l.Tools, "patches.rvp") }
-func (l *Layout) FDroidConfig() string { return filepath.Join(l.Repo, "config.yml") }
-func (l *Layout) BotConfig() string    { return filepath.Join(l.Repo, "revancedbot.yaml") }
+func (l *Layout) PatcherJAR() string { return filepath.Join(l.Tools, "revanced-cli.jar") }
+func (l *Layout) PatchesRVP() string { return filepath.Join(l.Tools, "patches.rvp") }
+
+// StageConfig is config.yml under CACHE stage (fdroid update cwd).
+func (l *Layout) StageConfig() string { return filepath.Join(l.Stage, "config.yml") }
+
+// LiveConfig is the published config.yml in REPO (after atomic publish).
+func (l *Layout) LiveConfig() string { return filepath.Join(l.Repo, "config.yml") }
+
+// FDroidConfig is the stage config path (writes go here during a run).
+func (l *Layout) FDroidConfig() string { return l.StageConfig() }
+
+func (l *Layout) BotConfig() string { return filepath.Join(l.Repo, "revancedbot.yaml") }
+
+// LiveRepoDir is REPO/repo after publish.
+func (l *Layout) LiveRepoDir() string { return filepath.Join(l.Repo, "repo") }
+
+// LiveMetaDir is REPO/metadata after publish.
+func (l *Layout) LiveMetaDir() string { return filepath.Join(l.Repo, "metadata") }
 
 // CacheHit reports whether path exists and is large enough to count as a hit.
 func CacheHit(path string) bool {

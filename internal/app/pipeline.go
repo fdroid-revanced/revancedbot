@@ -56,19 +56,30 @@ func (a *App) LoadSigning() error {
 	return nil
 }
 
-// WriteFDroidConfig generates gitignored REPO/config.yml from revancedbot.yaml authority.
-func (a *App) WriteFDroidConfig() error {
+// PrepareStage seeds CACHE/fdroid from live REPO (history) and writes stage config.yml.
+// No live REPO mutation.
+func (a *App) PrepareStage() error {
 	if a.Blob == nil {
 		return fmt.Errorf("signing not loaded")
 	}
-	if err := fdroid.EnsureLayout(a.WS.Repo); err != nil {
+	if err := fdroid.SeedStage(a.WS.Stage, a.WS.Repo); err != nil {
 		return err
 	}
-	return fdroid.WriteConfig(a.WS.FDroidConfig(), fdroid.RepoMeta{
+	return fdroid.WriteConfig(a.WS.StageConfig(), fdroid.RepoMeta{
 		Name:        a.Cfg.RepoName,
 		URL:         a.Cfg.RepoURL,
 		Description: a.Cfg.RepoDescription,
 	}, a.WS.KeystorePath, a.Blob)
+}
+
+// WriteFDroidConfig is an alias for PrepareStage (stage-only config).
+func (a *App) WriteFDroidConfig() error {
+	return a.PrepareStage()
+}
+
+// PublishStage atomically replaces REPO/{repo,metadata,config.yml} from CACHE/fdroid.
+func (a *App) PublishStage() error {
+	return fdroid.Publish(a.WS.Stage, a.WS.Repo)
 }
 
 // FetchTools downloads CLI + patches into CACHE (skips name hits).
@@ -220,10 +231,10 @@ func (a *App) processVersion(ctx context.Context, job revanced.Job, ver string, 
 	if err := taskgroup.GoIsolated(ctx, "stage:"+job.PackageID, taskgroup.IO, func(ctx context.Context, s *taskgroup.Status) error {
 		defer s.Unit()()
 		s.Update("stage")
-		if err := fdroid.StageAPK(a.WS.Repo, outPath); err != nil {
+		if err := fdroid.StageAPK(a.WS.Stage, outPath); err != nil {
 			return err
 		}
-		return fdroid.WritePatchesMetadata(a.WS.Repo, pubID, patches)
+		return fdroid.WritePatchesMetadata(a.WS.Stage, pubID, patches)
 	}); err != nil {
 		return err
 	}
@@ -265,7 +276,7 @@ func moveFile(src, dst string) error {
 	return nil
 }
 
-// FDroidUpdate runs fdroid update in REPO (IO task when a group is present).
+// FDroidUpdate runs fdroid update on the CACHE stage tree (not live REPO).
 func (a *App) FDroidUpdate(ctx context.Context, createMeta bool) error {
 	if a.Blob == nil {
 		return fmt.Errorf("signing not loaded")
@@ -273,7 +284,7 @@ func (a *App) FDroidUpdate(ctx context.Context, createMeta bool) error {
 	return taskgroup.GoIsolated(ctx, "fdroid-update", taskgroup.IO, func(ctx context.Context, s *taskgroup.Status) error {
 		defer s.Unit()()
 		s.Update("fdroid update")
-		return fdroid.Update(a.WS.Repo, a.Blob, createMeta)
+		return fdroid.Update(a.WS.Stage, a.Blob, createMeta, a.WS.Shims)
 	})
 }
 
@@ -358,8 +369,12 @@ func (a *App) RunFull(ctx context.Context) error {
 		summarize()
 	}
 
-	log.Info("running fdroid update", "repo", a.WS.Repo)
+	log.Info("running fdroid update", "stage", a.WS.Stage)
 	if err := a.FDroidUpdate(ctx, true); err != nil {
+		return err
+	}
+	log.Info("publishing stage to REPO", "stage", a.WS.Stage, "repo", a.WS.Repo)
+	if err := a.PublishStage(); err != nil {
 		return err
 	}
 	log.Info("done", "repo", a.WS.Repo)
@@ -431,6 +446,9 @@ func (a *App) RunSmoke(ctx context.Context, maxOK int) (ok int, err error) {
 		return 0, fmt.Errorf("no package succeeded download+patch (tried %d jobs)", len(jobs))
 	}
 	if err := a.FDroidUpdate(ctx, true); err != nil {
+		return ok, err
+	}
+	if err := a.PublishStage(); err != nil {
 		return ok, err
 	}
 	return ok, nil

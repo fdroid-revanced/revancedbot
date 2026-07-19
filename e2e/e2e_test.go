@@ -11,8 +11,8 @@ import (
 	"time"
 
 	"github.com/lucasew/revancedbot/internal/app"
-	_ "github.com/lucasew/revancedbot/internal/drivers"
 	"github.com/lucasew/revancedbot/internal/config"
+	_ "github.com/lucasew/revancedbot/internal/drivers"
 	"github.com/lucasew/revancedbot/internal/signing"
 	"github.com/lucasew/revancedbot/internal/toolscheck"
 	"workspaced/pkg/logging"
@@ -57,12 +57,24 @@ func TestE2E_RepoCacheLayout(t *testing.T) {
 			t.Fatalf("keystore not under cache: %s", a.WS.KeystorePath)
 		}
 	}
-	if err := a.WriteFDroidConfig(); err != nil {
+	if err := a.PrepareStage(); err != nil {
 		t.Fatal(err)
 	}
-	// config.yml exists; keystore does not live in repo
-	if _, err := os.Stat(a.WS.FDroidConfig()); err != nil {
+	// stage config in CACHE; not live REPO until PublishStage
+	if _, err := os.Stat(a.WS.StageConfig()); err != nil {
 		t.Fatal(err)
+	}
+	if _, err := os.Stat(a.WS.LiveConfig()); err == nil {
+		t.Fatal("config.yml must not be written directly to live REPO before publish")
+	}
+	if err := a.PublishStage(); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(a.WS.LiveConfig()); err != nil {
+		t.Fatal("config.yml missing from REPO after publish")
+	}
+	if !filepath.HasPrefix(a.WS.Stage, a.WS.Cache) {
+		t.Fatalf("stage not under cache: %s", a.WS.Stage)
 	}
 	if _, err := os.Stat(filepath.Join(repo, "keystore.jks")); err == nil {
 		t.Fatal("keystore must not be in REPO")
