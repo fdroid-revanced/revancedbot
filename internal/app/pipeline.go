@@ -8,6 +8,7 @@ import (
 	"strings"
 	"sync/atomic"
 
+	"github.com/lucasew/revancedbot/internal/apkmeta"
 	"github.com/lucasew/revancedbot/internal/config"
 	"github.com/lucasew/revancedbot/internal/download"
 	"github.com/lucasew/revancedbot/internal/fdroid"
@@ -127,7 +128,9 @@ func (a *App) ProcessPackage(ctx context.Context, job revanced.Job) error {
 
 func (a *App) processVersion(ctx context.Context, job revanced.Job, ver string, reg download.Registry, order []string) error {
 	log := logging.GetLogger(ctx)
-	stockPath := a.WS.StockAPKPath(job.PackageID, ver)
+	// Request label for downloaders (empty = source "latest" / newest release).
+	reqVer := ver
+	stockPath := a.WS.StockAPKPath(job.PackageID, reqVer)
 	var res *download.Result
 
 	if workspace.CacheHit(stockPath) {
@@ -139,31 +142,51 @@ func (a *App) processVersion(ctx context.Context, job revanced.Job, ver string, 
 		}
 	}
 	if res == nil {
-		log.Info("download attempt", "package", job.PackageID, "version", emptyAsLatest(ver))
+		label := reqVer
+		if label == "" {
+			label = "latest"
+		}
+		log.Info("download attempt", "package", job.PackageID, "version", label)
 		got, err := download.FetchFirst(ctx, reg, order, download.Request{
 			PackageID: job.PackageID,
-			Version:   ver,
+			Version:   reqVer,
 		}, a.WS.StockAPKs)
 		if err != nil {
 			return err
 		}
-		if got.Path != stockPath {
-			if err := os.Rename(got.Path, stockPath); err != nil {
-				b, rerr := os.ReadFile(got.Path)
-				if rerr != nil {
-					return rerr
-				}
-				if werr := os.WriteFile(stockPath, b, 0o644); werr != nil {
-					return werr
-				}
-				_ = os.Remove(got.Path)
-			}
-			got.Path = stockPath
-		}
 		res = got
 	}
 
-	outName := fmt.Sprintf("%s_%s_revanced.apk", sanitize(job.PackageID), sanitize(emptyAsLatest(ver)))
+	// Ground truth: versionName from the APK. "Any"/latest downloads must not
+	// stay labeled "latest" in the F-Droid tree.
+	resolved := reqVer
+	if info, err := apkmeta.Inspect(res.Path); err != nil {
+		log.Warn("apk version inspect failed; using request label", "err", err, "label", emptyAsLatest(reqVer))
+		if resolved == "" {
+			resolved = "latest"
+		}
+	} else {
+		if info.VersionName != "" {
+			resolved = info.VersionName
+		} else if info.VersionCode != "" {
+			resolved = info.VersionCode
+		}
+		if reqVer != "" && info.VersionName != "" && !versionMatches(reqVer, info.VersionName) {
+			log.Warn("requested version differs from APK", "want", reqVer, "got", info.VersionName)
+		}
+		log.Info("resolved apk version", "package", job.PackageID, "versionName", info.VersionName, "versionCode", info.VersionCode)
+	}
+
+	// Canonical stock cache path under the real version name.
+	canonStock := a.WS.StockAPKPath(job.PackageID, resolved)
+	if res.Path != canonStock {
+		if err := moveFile(res.Path, canonStock); err != nil {
+			return fmt.Errorf("canonicalize stock apk: %w", err)
+		}
+		res.Path = canonStock
+	}
+
+	outName := fmt.Sprintf("%s_%s_revanced.apk", sanitize(job.PackageID), sanitize(resolved))
 	outPath := filepath.Join(a.WS.Work, outName)
 	if err := os.MkdirAll(a.WS.Work, 0o755); err != nil {
 		return err
@@ -173,7 +196,7 @@ func (a *App) processVersion(ctx context.Context, job revanced.Job, ver string, 
 	err := taskgroup.GoIsolated(ctx, "patch:"+job.PackageID, taskgroup.CPU, func(ctx context.Context, s *taskgroup.Status) error {
 		defer s.Unit()()
 		s.Update("revanced-cli")
-		log.Info("patching", "in", res.Path, "out", outPath)
+		log.Info("patching", "in", res.Path, "out", outPath, "version", resolved)
 		ps, err := revanced.Patch(revanced.PatchOptions{
 			CLIJar:                  a.WS.PatcherJAR(),
 			PatchesRVP:              a.WS.PatchesRVP(),
@@ -204,7 +227,41 @@ func (a *App) processVersion(ctx context.Context, job revanced.Job, ver string, 
 	}); err != nil {
 		return err
 	}
-	log.Info("package ok", "package", job.PackageID, "apk", outPath)
+	log.Info("package ok", "package", job.PackageID, "version", resolved, "apk", outPath)
+	return nil
+}
+
+// versionMatches reports whether a request label agrees with APK versionName.
+func versionMatches(want, got string) bool {
+	want = strings.TrimSpace(want)
+	got = strings.TrimSpace(got)
+	if want == "" || got == "" {
+		return true
+	}
+	if want == got {
+		return true
+	}
+	return strings.HasPrefix(got, want) || strings.HasPrefix(want, got)
+}
+
+func moveFile(src, dst string) error {
+	if src == dst {
+		return nil
+	}
+	if err := os.MkdirAll(filepath.Dir(dst), 0o755); err != nil {
+		return err
+	}
+	if err := os.Rename(src, dst); err == nil {
+		return nil
+	}
+	b, err := os.ReadFile(src)
+	if err != nil {
+		return err
+	}
+	if err := os.WriteFile(dst, b, 0o644); err != nil {
+		return err
+	}
+	_ = os.Remove(src)
 	return nil
 }
 
