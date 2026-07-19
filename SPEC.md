@@ -1,6 +1,6 @@
 # revancedbot — product & technical spec
 
-Status: agreed (product + toolchain + repo/cache layout grills, 2026-07-18).  
+Status: agreed (product + toolchain + repo/cache layout grills, 2026-07-18; **progress / workspaced XP** grill, 2026-07-19).  
 Python under `revancedbot/` is a prototype only; the target implementation is **Go**.
 
 ## 1. Goal
@@ -31,8 +31,9 @@ Consumer visibility (public vs private) is **deferred**. The **tool** is public.
 | Language | **Go** (rewrite) |
 | Binary name | **`revancedbot`** |
 | CLI | **Cobra** subcommands + **Viper** config |
-| Parallelism | [`workspaced/pkg/taskgroup`](https://github.com/lucasew/workspaced) — pools, `Map`/`Each`, **`Isolate`/`GoIsolated` for skip-on-fail** |
-| Logging | [`workspaced/pkg/logging`](https://github.com/lucasew/workspaced) — **`slog` logger in context** (`ContextWithLogger` / `GetLogger`) |
+| Parallelism + progress | [`workspaced/pkg/taskgroup`](https://github.com/lucasew/workspaced) — **same UX as workspaced**: Session, lazy TUI, pools, `Map`/`Each`, `Isolate` |
+| Logging | [`workspaced/pkg/logging`](https://github.com/lucasew/workspaced) — ctx `slog`; **`NewPlainHandler`** (not TextHandler) |
+| HTTP / fetch | workspaced **`httpclient`** + **`fetchurl`** drivers (minimal prelude — not full desktop prelude) |
 | GitHub API | [`google/go-github`](https://github.com/google/go-github) (ReVanced release assets; token when present) |
 | Browser automation | [**go-rod**](https://github.com/go-rod/rod) against a **CDP URL** (no in-process browser launch in production) |
 | Releases of this tool | **GoReleaser** → GitHub Releases → consumer mise pin |
@@ -117,19 +118,76 @@ Bot sets those env vars for the `fdroid` subprocess from the signing blob. **Key
 
 CLI flags: `--cache`, `--config` (override yaml path), dry-run as needed. **REPO is positional** for `run` (and commands that act on a tree).
 
-### 3.4 taskgroup usage
+### 3.4 Progress, Session, and taskgroup (workspaced XP)
 
-- Cobra: `Session.Enter` / `Close` around command lifetime.
-- Fan-out packages with `Map`/`Each`; resource pools (`Internet` downloads, `CPU` patch).
-- Per-package failures use **`Isolate`** so one failure does not cancel siblings.
-- Default pool limits follow taskgroup defaults unless config overrides (IO=4, CPU=NumCPU, Internet=4).
+**Product rule:** revancedbot gives the **same progress experience as workspaced** — not a custom bar framework. Implementation is workspaced’s Session + taskgroup TUI + drivers.
 
-### 3.5 Module dependency
+#### Session lifecycle
+
+- Cobra root: **`taskgroup.Enter`** in `PersistentPreRun`, **`Session.Close`** in `PersistentPostRun` (wait tasks, tear down UI, run `AfterWait`).
+- Progress UI starts **lazily** on the first scheduled task (`Group.Go` / `Map` / `Each`), when the terminal is interactive — same guards as workspaced (no TUI if not a TTY, or `CI` / `NO_COLOR` / `TERM=dumb`).
+- Force TUI for debugging: **`WORKSPACED_FORCE_TUI=1`** (no separate `REVANCEDBOT_*` knob).
+- CI / pipes: full taskgroup semantics (pools, Isolate, cancellation rules) with **logs only** — no bars required.
+
+#### Every command uses the group
+
+- **All** subcommands that do real work schedule it through taskgroup (`Go`, `Unit`, `Map`/`Each`, `Isolate`). No sequential “side path” that bypasses the Session for long work.
+- Trivial single-step commands use a short Control/`Unit` task as needed.
+- `--help` / no work scheduled → no TUI (nothing to observe).
+
+#### Bar owners (kitchen sink)
+
+One owner per bar (workspaced hierarchy rules: do not stack extra `Unit` around `Map`/`Each` or around HTTP that already owns progress).
+
+| Work | Visible as | Pool |
+|------|------------|------|
+| Package fan-out shell | Aggregate `Each`/`Map` over packages | **Control** (orchestration only) |
+| Stock APK download / HTML scrape HTTP | Internet tasks (httpclient progress) | **Internet** |
+| ReVanced CLI jar + patches fetch | fetchurl / Internet | **Internet** |
+| ReVanced **patch** (+ re-sign) | Named task | **CPU** |
+| Stage into REPO, metadata writes | Nested task as needed | **IO** |
+| **`fdroid update`** | Named task | **IO** |
+
+**Control until non-trivial work:** package shells and setup stay Control; slots for Internet/CPU/IO are taken only when that work actually runs (avoid holding Internet for the whole download+patch lifetime).
+
+#### HTTP and asset download
+
+- **`httpclient`**: all scraper / ad-hoc HTTP (including multi-step APKMirror pages + final APK body). Progress via driver’s **`WithProgress`** (every request on a group `ctx` can become a fetch bar — same as workspaced; short HTML GETs may produce short bars).
+- **`fetchurl`**: known-URL assets when we have a URL (and optional hash) — especially **ReVanced tools** (jar/rvp). Prefer fetchurl over hand-rolled download loops for those.
+- Downloaders keep custom HTML/resolve logic; they **must** use the progress-aware client for HTTP, not a bare `http.Client` that hides work from the Session.
+
+#### Logging under the UI
+
+- Root logger: **`logging.NewPlainHandler`** on stderr (workspaced-style plain lines).
+- While the TUI is active, Session output routing folds logs into the progress UI the same way workspaced does.
+
+#### Pool limits
+
+- Applied at **`Enter`** (limits are fixed for the Session).
+- When REPO / `revancedbot.yaml` is known at Session start, read **`pool_io` / `pool_cpu` / `pool_internet`**.
+- **Unspecified → taskgroup defaults** (IO=4, CPU=NumCPU, Internet=4).
+- Commands without config keep defaults.
+
+#### Package failure vs command result
+
+- Per-package work uses **`Isolate`**: one package fail does **not** cancel siblings (soft-skip).
+- Soft-skip does **not** fail `Session.Close` by itself.
+- End of `run` (and similar): **summary** of ok / skipped + reasons (logs and/or `AfterWait` print).
+- Command still **fails** on plumbing errors (preflight, signing, tool fetch hard-fail, `fdroid update`, etc.).
+- Exit 0 with some packages skipped is allowed if the pipeline completed and at least plumbing succeeded (empty-success policy for “zero packages built” may tighten later; not required for soft-skip UX).
+
+### 3.5 Module dependency (workspaced)
 
 Import from [lucasew/workspaced](https://github.com/lucasew/workspaced):
 
-- `workspaced/pkg/taskgroup`
-- `workspaced/pkg/logging`
+| Import | Role |
+|--------|------|
+| `workspaced/pkg/taskgroup` | Session, pools, Map/Each/Isolate, progress TUI |
+| `workspaced/pkg/logging` | Ctx logger, PlainHandler, Close helpers |
+| `workspaced/pkg/driver` + **`httpclient`** | Progress-aware HTTP client |
+| `workspaced/pkg/driver` + **`fetchurl`** | Known-URL (+ optional hash) downloads |
+
+**Driver prelude:** **minimal revancedbot prelude** — blank-import only factories we need (at least `httpclient/native`, `fetchurl`). **Not** full `workspaced/pkg/driver/prelude` (no wallpaper/tray/audio zoo).
 
 Note: upstream `go.mod` currently declares `module workspaced`; require/replace may be needed until the module path is published cleanly.
 
@@ -197,10 +255,11 @@ Renovate (or similar) bumps pins via PRs.
 | Library | Role |
 |---------|------|
 | Cobra / Viper | CLI + config |
-| workspaced taskgroup + logging | Parallelism + ctx logger |
-| google/go-github | GitHub Releases API |
+| workspaced **taskgroup** + **logging** | Session, progress TUI, pools, ctx logger (PlainHandler) |
+| workspaced **httpclient** + **fetchurl** (minimal driver prelude) | Progress-aware HTTP; known-URL tool/asset fetch |
+| google/go-github | GitHub Releases API (metadata / discovery; large assets may still go through fetchurl/httpclient) |
 | go-rod | Browser downloaders when CDP URL is set |
-| stdlib `net/http`, `os/exec` | HTTP downloaders, subprocesses |
+| stdlib `os/exec` | Subprocesses (`java`, `fdroid`, `keytool`, …) |
 
 ### 4.6 Pipeline data flow
 
@@ -225,7 +284,8 @@ preflight host tools (java, keytool, fdroid, apksigner, aapt, …)
 | Package set | **All** packages advertised by ReVanced patches |
 | Versions | **One build per package per run**: walk “most common compatible” **top → bottom** |
 | Success | First version that downloads and patches successfully wins |
-| Failure | **Skip** package; record reason; continue |
+| Failure | **Skip** package; record reason; continue (**Isolate**; does not cancel siblings) |
+| Run summary | End of run: report **ok / skipped + reasons** (soft-skip does not fail the command by itself) |
 | Rebuild | **Full** pipeline work every scheduled run |
 | Same versionCode | If stock-derived versionCode already published for that patched id → **ignore** (no fake Android updates) |
 | History | **Accumulate** distinct versionCodes until cleanup is designed later |
@@ -372,23 +432,27 @@ No CI cache restore for `CACHE` required; default mkdtemp is intentional simplic
 | F-Droid | unused `fdroidserver` dep | mise `pipx:fdroidserver` + `fdroid update` |
 | Keys | none | keytool abstracted → paste secret |
 | Metadata | none | APK/fdroid + patches footer; scrapers later |
-| Parallelism | sequential | workspaced taskgroup |
-| Logging | logging module ad hoc | workspaced ctx logging |
+| Parallelism | sequential | workspaced taskgroup Session + pools |
+| Progress UI | none | workspaced lazy TUI (same XP); CI logs only |
+| HTTP download | ad hoc | httpclient + fetchurl drivers (minimal prelude) |
+| Logging | logging module ad hoc | workspaced PlainHandler + ctx logger |
 | Releases | none | GoReleaser + pinned mise |
 
 ## 15. Suggested implementation order
 
-1. Go module scaffold, Cobra, Viper, workspaced logging/taskgroup wiring  
-2. `keys generate` / `validate` (keytool + blob)  
-3. `fetch-tools` + `list-jobs` (GitLab/GitHub/mirrors for patches)  
-4. Downloader interface + first HTTP source; rod path behind CDP URL  
-5. `patch` (defaults, `.revanced`, operator keystore)  
-6. **REPO positional + CACHE (`--cache` / mkdtemp); naive name hits; no temp in REPO**  
-7. **`revancedbot.yaml` authority → generate gitignored `config.yml`; host tool preflight**  
-8. Simple binary `fdroid-init` / `fdroid-update` with host `apksigner`/`aapt`  
-9. `run REPO` + Isolate fan-out  
-10. GoReleaser + example consumer layout (`.gitignore` includes `config.yml`)  
-11. (Later) marketing scrapers + more downloaders  
+1. Go module scaffold, Cobra, Viper, workspaced logging/taskgroup Session  
+2. Minimal driver prelude (httpclient + fetchurl); PlainHandler; pools at Enter from yaml  
+3. `keys generate` / `validate` (keytool + blob)  
+4. `fetch-tools` via fetchurl + `list-jobs` (GitLab/GitHub/mirrors for patches)  
+5. Downloader interface + HTTP sources on httpclient; rod path behind CDP URL  
+6. `patch` (defaults, `.revanced`, operator keystore) as CPU task  
+7. **REPO positional + CACHE (`--cache` / mkdtemp); naive name hits; no temp in REPO**  
+8. **`revancedbot.yaml` authority → generate gitignored `config.yml`; host tool preflight**  
+9. Simple binary `fdroid-init` / `fdroid-update` (IO task) with host `apksigner`/`aapt`  
+10. `run REPO` + Control package Each + Isolate + end summary  
+11. Align all subcommands with taskgroup (no sequential side paths)  
+12. GoReleaser + example consumer layout (`.gitignore` includes `config.yml`)  
+13. (Later) marketing scrapers + more downloaders  
 
 ## 16. Open implementation details (non-blocking)
 
