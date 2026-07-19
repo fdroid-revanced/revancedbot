@@ -172,7 +172,7 @@ One owner per bar (workspaced hierarchy rules: do not stack extra `Unit` around 
 
 #### Pool limits
 
-- Default: **`taskgroup.DefaultLimits()`** from workspaced (IO=4, CPU=NumCPU, Internet=4).
+- Default: workspaced **`DefaultLimits()`** with **Internet=2** for stock scrapes (IO=4, CPU=NumCPU). Packages `Map` stays **Control**; HTTP uses **Internet** via httpclient progress (do not put the packages Map on Internet or downloads can deadlock on double acquire).
 - Optional overrides in `revancedbot.yaml`: `pool_io`, `pool_cpu`, `pool_internet` (positive values only).
 - Omit those keys (recommended for most repos) to keep workspaced defaults.
 
