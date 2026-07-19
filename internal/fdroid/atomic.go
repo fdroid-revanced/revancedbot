@@ -28,6 +28,12 @@ func WriteFileAtomic(path string, data []byte, perm os.FileMode) error {
 // Stage must contain config.yml, repo/, metadata/ after a successful fdroid update.
 // revancedbot.yaml in REPO is never touched.
 func Publish(stageRoot, liveRepo string) error {
+	if err := ValidateStageAfterUpdate(stageRoot); err != nil {
+		return fmt.Errorf("publish aborted: %w", err)
+	}
+	if err := RemovePublishLeftovers(liveRepo); err != nil {
+		return err
+	}
 	if err := os.MkdirAll(liveRepo, 0o755); err != nil {
 		return err
 	}

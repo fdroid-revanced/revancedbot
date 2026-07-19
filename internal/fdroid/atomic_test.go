@@ -34,6 +34,9 @@ func TestPublish(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(stage, "repo", "a.apk"), []byte("apk"), 0o644); err != nil {
 		t.Fatal(err)
 	}
+	if err := os.WriteFile(filepath.Join(stage, "repo", "index-v1.json"), []byte(`{"apps":[]}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
 	if err := os.WriteFile(filepath.Join(stage, "metadata", "pkg.yml"), []byte("x: 1\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}

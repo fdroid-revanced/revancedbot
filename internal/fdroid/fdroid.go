@@ -104,13 +104,25 @@ func EnsureLayout(root string) error {
 }
 
 // SeedStage copies existing live REPO repo/ and metadata/ into stage (for history).
-// If live paths are missing, creates empty stage dirs only.
+// If live is missing or fails structure validation, starts an empty stage (regen).
+// Corrupt JSON under live is stripped when possible; if still invalid, seed is skipped.
 func SeedStage(stageRoot, liveRepo string) error {
 	if err := os.RemoveAll(stageRoot); err != nil {
 		return err
 	}
 	if err := EnsureLayout(stageRoot); err != nil {
 		return err
+	}
+	// Prefer clean live; strip bad JSON leftovers before deciding to seed.
+	_ = RemovePublishLeftovers(liveRepo)
+	if repoDir := filepath.Join(liveRepo, "repo"); dirExists(repoDir) {
+		if _, err := SanitizeJSONTree(repoDir); err != nil {
+			return fmt.Errorf("sanitize live repo JSON: %w", err)
+		}
+	}
+	if err := ValidateLiveForSeed(liveRepo); err != nil {
+		// Outside happy path: do not copy garbage; empty stage (fdroid update will regen indexes).
+		return nil
 	}
 	for _, name := range []string{"repo", "metadata"} {
 		src := filepath.Join(liveRepo, name)
@@ -129,7 +141,19 @@ func SeedStage(stageRoot, liveRepo string) error {
 			return fmt.Errorf("seed %s: %w", name, err)
 		}
 	}
+	// After copy, strip any remaining bad JSON; if tree still invalid, abort (do not publish garbage).
+	if _, err := SanitizeJSONTree(filepath.Join(stageRoot, "repo")); err != nil {
+		return err
+	}
+	if err := ValidateJSONTree(filepath.Join(stageRoot, "repo")); err != nil {
+		return fmt.Errorf("seed produced invalid structure (fix live repo or wipe repo/): %w", err)
+	}
 	return nil
+}
+
+func dirExists(p string) bool {
+	st, err := os.Stat(p)
+	return err == nil && st.IsDir()
 }
 
 // StageAPK copies a patched APK into stage/repo/ (atomic write).
@@ -190,6 +214,9 @@ func Update(stageRoot string, blob *signing.Blob, createMetadata bool, shimDir s
 	)
 	if err := cmd.Run(); err != nil {
 		return fmt.Errorf("fdroid update: %w", err)
+	}
+	if err := ValidateStageAfterUpdate(stageRoot); err != nil {
+		return err
 	}
 	return nil
 }
