@@ -19,10 +19,12 @@ type Config struct {
 	RepoDescription string
 	DownloaderOrder []string
 	BrowserCDPURL   string
-	PoolIO          int
-	PoolCPU         int
-	PoolInternet    int
 	LogLevel        string
+
+	// Optional pool overrides. Zero means "use workspaced DefaultLimits for that pool".
+	PoolIO       int
+	PoolCPU      int
+	PoolInternet int
 
 	SigningBlob string
 	GitHubToken string
@@ -77,9 +79,6 @@ func LoadFromRepo(repo, cacheFlag, cfgFile string) (*Config, error) {
 	v.SetDefault("repo_url", "https://example.invalid/fdroid/repo")
 	v.SetDefault("repo_description", "ReVanced-patched apps (simple binary repository).")
 	v.SetDefault("downloaders", []string{"apkpure", "apkmirror"})
-	v.SetDefault("pool_io", 4)
-	v.SetDefault("pool_cpu", 0)
-	v.SetDefault("pool_internet", 4)
 	v.SetDefault("log_level", "info")
 
 	if cfgFile != "" {
@@ -103,11 +102,12 @@ func LoadFromRepo(repo, cacheFlag, cfgFile string) (*Config, error) {
 		RepoURL         string   `mapstructure:"repo_url"`
 		RepoDescription string   `mapstructure:"repo_description"`
 		Downloaders     []string `mapstructure:"downloaders"`
-		PoolIO          int      `mapstructure:"pool_io"`
-		PoolCPU         int      `mapstructure:"pool_cpu"`
-		PoolInternet    int      `mapstructure:"pool_internet"`
-		LogLevel        string   `mapstructure:"log_level"`
-		Browser         struct {
+		// Optional; omit or 0 → workspaced DefaultLimits for that pool.
+		PoolIO       int    `mapstructure:"pool_io"`
+		PoolCPU      int    `mapstructure:"pool_cpu"`
+		PoolInternet int    `mapstructure:"pool_internet"`
+		LogLevel     string `mapstructure:"log_level"`
+		Browser      struct {
 			CDPURL string `mapstructure:"cdp_url"`
 		} `mapstructure:"browser"`
 		CDPURL string `mapstructure:"cdp_url"`

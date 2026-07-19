@@ -172,10 +172,9 @@ One owner per bar (workspaced hierarchy rules: do not stack extra `Unit` around 
 
 #### Pool limits
 
-- Applied at **`Enter`** (limits are fixed for the Session).
-- When REPO / `revancedbot.yaml` is known at Session start, read **`pool_io` / `pool_cpu` / `pool_internet`**.
-- **Unspecified → taskgroup defaults** (IO=4, CPU=NumCPU, Internet=4).
-- Commands without config keep defaults.
+- Default: **`taskgroup.DefaultLimits()`** from workspaced (IO=4, CPU=NumCPU, Internet=4).
+- Optional overrides in `revancedbot.yaml`: `pool_io`, `pool_cpu`, `pool_internet` (positive values only).
+- Omit those keys (recommended for most repos) to keep workspaced defaults.
 
 #### Package failure vs command result
 

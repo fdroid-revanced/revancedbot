@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
-	"runtime"
 	"sync"
 
 	"github.com/lucasew/revancedbot/internal/app"
@@ -37,8 +36,7 @@ func NewRoot() *cobra.Command {
 			ctx := logging.NewRootContext(slog.New(h))
 			// Keep slog.Default in sync so any leftover stdlib slog calls match.
 			slog.SetDefault(slog.New(h))
-			limits := limitsFromArgs(args)
-			sess, ctx := taskgroup.Enter(ctx, limits)
+			sess, ctx := taskgroup.Enter(ctx, limitsFromArgs(args))
 			sessionMu.Lock()
 			session = sess
 			sessionMu.Unlock()
@@ -74,8 +72,9 @@ func NewRoot() *cobra.Command {
 	return root
 }
 
-// limitsFromArgs loads pool_* from REPO/revancedbot.yaml when args[0] is a repo path.
-// Unspecified pools use taskgroup defaults.
+// limitsFromArgs returns workspaced DefaultLimits, optionally overridden by
+// pool_io / pool_cpu / pool_internet in REPO/revancedbot.yaml when present.
+// Omitted or zero pool fields leave the workspaced default for that pool.
 func limitsFromArgs(args []string) taskgroup.Limits {
 	limits := taskgroup.DefaultLimits()
 	if len(args) < 1 {
@@ -85,21 +84,11 @@ func limitsFromArgs(args []string) taskgroup.Limits {
 	if err != nil {
 		return limits
 	}
-	return poolsFromConfig(cfg)
-}
-
-func poolsFromConfig(cfg *config.Config) taskgroup.Limits {
-	limits := taskgroup.DefaultLimits()
-	if cfg == nil {
-		return limits
-	}
 	if cfg.PoolIO > 0 {
 		limits.IO = cfg.PoolIO
 	}
 	if cfg.PoolCPU > 0 {
 		limits.CPU = cfg.PoolCPU
-	} else {
-		limits.CPU = max(runtime.NumCPU(), 1)
 	}
 	if cfg.PoolInternet > 0 {
 		limits.Internet = cfg.PoolInternet
