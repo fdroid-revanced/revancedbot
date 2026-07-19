@@ -223,15 +223,16 @@ func (a *APKMirror) findVariant(ctx context.Context, cl *http.Client, releasePat
 // (bundle / APKM / split packages). Those fail ValidateAPK and waste a download.
 func isBundleVariant(path, window string) bool {
 	lowPath := strings.ToLower(path)
+	lowWin := strings.ToLower(window)
 	if strings.Contains(lowPath, "bundle") || strings.Contains(lowPath, "apkm") {
 		return true
 	}
 	// Nearby table text on the release page.
-	if strings.Contains(window, "bundle") ||
-		strings.Contains(window, "apkm") ||
-		strings.Contains(window, "xapk") ||
-		strings.Contains(window, "apks") ||
-		strings.Contains(window, "split apk") {
+	if strings.Contains(lowWin, "bundle") ||
+		strings.Contains(lowWin, "apkm") ||
+		strings.Contains(lowWin, "xapk") ||
+		strings.Contains(lowWin, "apks") ||
+		strings.Contains(lowWin, "split apk") {
 		return true
 	}
 	return false
