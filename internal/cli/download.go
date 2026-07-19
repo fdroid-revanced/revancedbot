@@ -23,14 +23,14 @@ func newDownloadCmd() *cobra.Command {
 				return fmt.Errorf("--package is required")
 			}
 			path := a.WS.StockAPKPath(pkg, ver)
-			if workspace.CacheHit(path) {
+			if workspace.CacheHit(path) && download.AcceptCached(path) == nil {
 				fmt.Printf("cache\t%s\n", path)
 				return nil
 			}
 			reg := download.DefaultRegistry()
 			order := a.Cfg.DownloaderOrder
 			if len(order) == 0 {
-				order = []string{"apkpure"}
+				order = download.DefaultOrder
 			}
 			res, err := download.FetchFirst(ctxOf(cmd), reg, order, download.Request{
 				PackageID: pkg,

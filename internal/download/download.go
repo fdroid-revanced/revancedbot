@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 )
 
@@ -35,15 +36,25 @@ type Downloader interface {
 // Registry maps downloader ids to implementations.
 type Registry map[string]Downloader
 
+// DefaultOrder is the built-in fallback order when config omits downloaders.
+var DefaultOrder = []string{"apkpure", "apkmirror"}
+
 // DefaultRegistry returns built-in downloaders.
 func DefaultRegistry() Registry {
 	return Registry{
-		"apkpure": &APKPure{},
+		"apkpure":   &APKPure{},
+		"apkmirror": &APKMirror{},
 	}
 }
 
-// FetchFirst tries downloaders in order until one succeeds.
+// FetchFirst tries downloaders in order until one succeeds and the file
+// passes ValidateAPK. Failed partial files from a downloader are left for
+// that downloader to clean up; FetchFirst removes the path if validation fails
+// after a reported success.
 func FetchFirst(ctx context.Context, reg Registry, order []string, req Request, destDir string) (*Result, error) {
+	if len(order) == 0 {
+		order = DefaultOrder
+	}
 	var errs []string
 	for _, id := range order {
 		d, ok := reg[id]
@@ -56,103 +67,78 @@ func FetchFirst(ctx context.Context, reg Registry, order []string, req Request, 
 			errs = append(errs, fmt.Sprintf("%s: %v", id, err))
 			continue
 		}
+		if err := ValidateAPK(res.Path); err != nil {
+			_ = os.Remove(res.Path)
+			errs = append(errs, fmt.Sprintf("%s: reject apk: %v", id, err))
+			continue
+		}
+		if res.SHA256 == "" {
+			sum, err := fileSHA256(res.Path)
+			if err != nil {
+				_ = os.Remove(res.Path)
+				errs = append(errs, fmt.Sprintf("%s: sha256: %v", id, err))
+				continue
+			}
+			res.SHA256 = sum
+		}
 		return res, nil
 	}
-	return nil, fmt.Errorf("all downloaders failed: %s", stringsJoin(errs, "; "))
+	return nil, fmt.Errorf("all downloaders failed: %s", strings.Join(errs, "; "))
 }
 
-func stringsJoin(ss []string, sep string) string {
-	if len(ss) == 0 {
-		return ""
+// AcceptCached validates an existing stock cache file; on failure the path is removed.
+func AcceptCached(path string) error {
+	if err := ValidateAPK(path); err != nil {
+		_ = os.Remove(path)
+		return err
 	}
-	out := ss[0]
-	for i := 1; i < len(ss); i++ {
-		out += sep + ss[i]
-	}
-	return out
+	return nil
 }
 
-// APKPure downloads via the d.apkpure.com APK endpoint (HTTP, no browser).
-// Prefers universal APK when the source serves one at this URL shape.
-type APKPure struct {
-	Client *http.Client
+func fileSHA256(path string) (string, error) {
+	f, err := os.Open(path)
+	if err != nil {
+		return "", err
+	}
+	defer f.Close()
+	h := sha256.New()
+	if _, err := io.Copy(h, f); err != nil {
+		return "", err
+	}
+	return hex.EncodeToString(h.Sum(nil)), nil
 }
 
-func (a *APKPure) ID() string { return "apkpure" }
-
-func (a *APKPure) client() *http.Client {
-	if a.Client != nil {
-		return a.Client
-	}
+func defaultHTTPClient() *http.Client {
 	return &http.Client{Timeout: 10 * time.Minute}
 }
 
-func (a *APKPure) Fetch(ctx context.Context, req Request, destDir string) (*Result, error) {
-	ver := req.Version
-	if ver == "" {
-		ver = "latest"
-	}
-	// Historical direct URL used by the prototype. May require browser fallback later.
-	url := fmt.Sprintf("https://d.apkpure.com/b/APK/%s?version=%s", req.PackageID, ver)
+// browserUA is a desktop Chrome UA; many APK hosts reject library defaults.
+const browserUA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36"
 
-	httpReq, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
-	if err != nil {
-		return nil, err
+func writeBody(path string, r io.Reader) (n int64, sha string, err error) {
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		return 0, "", err
 	}
-	httpReq.Header.Set("User-Agent", "Mozilla/5.0 (compatible; revancedbot/1.0)")
-
-	resp, err := a.client().Do(httpReq)
-	if err != nil {
-		return nil, err
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("HTTP %s for %s", resp.Status, url)
-	}
-
-	if err := os.MkdirAll(destDir, 0o755); err != nil {
-		return nil, err
-	}
-	name := fmt.Sprintf("%s_%s.apk", sanitize(req.PackageID), sanitize(ver))
-	path := filepath.Join(destDir, name)
 	f, err := os.Create(path)
 	if err != nil {
-		return nil, err
+		return 0, "", err
 	}
 	defer f.Close()
-
 	h := sha256.New()
 	w := io.MultiWriter(f, h)
-	n, err := io.Copy(w, resp.Body)
+	n, err = io.Copy(w, r)
 	if err != nil {
-		return nil, err
-	}
-	if n < 1024 {
 		_ = os.Remove(path)
-		return nil, fmt.Errorf("download too small (%d bytes), likely not an APK", n)
+		return n, "", err
 	}
-	// Reject HTML error pages that APK mirrors sometimes return.
-	head := make([]byte, 4)
-	if f2, err := os.Open(path); err == nil {
-		_, _ = f2.Read(head)
-		_ = f2.Close()
-		if string(head) == "<!DO" || string(head) == "<htm" || string(head) == "<HTM" {
-			_ = os.Remove(path)
-			return nil, fmt.Errorf("download looks like HTML, not an APK")
-		}
-		if !(head[0] == 'P' && head[1] == 'K') {
-			// APK is ZIP; allow if Android package magic via file later — still require ZIP
-			_ = os.Remove(path)
-			return nil, fmt.Errorf("download is not a ZIP/APK (magic %q)", head)
-		}
-	}
+	return n, hex.EncodeToString(h.Sum(nil)), nil
+}
 
-	return &Result{
-		Path:     path,
-		SourceID: a.ID(),
-		URL:      url,
-		SHA256:   hex.EncodeToString(h.Sum(nil)),
-	}, nil
+func stockFileName(packageID, version string) string {
+	if version == "" {
+		version = "latest"
+	}
+	return fmt.Sprintf("%s_%s.apk", sanitize(packageID), sanitize(version))
 }
 
 func sanitize(s string) string {

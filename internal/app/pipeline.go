@@ -102,7 +102,7 @@ func (a *App) ProcessPackage(ctx context.Context, job revanced.Job) error {
 	reg := download.DefaultRegistry()
 	order := a.Cfg.DownloaderOrder
 	if len(order) == 0 {
-		order = []string{"apkpure"}
+		order = download.DefaultOrder
 	}
 
 	versions := job.Versions
@@ -115,9 +115,15 @@ func (a *App) ProcessPackage(ctx context.Context, job revanced.Job) error {
 		stockPath := a.WS.StockAPKPath(job.PackageID, ver)
 		var res *download.Result
 		if workspace.CacheHit(stockPath) {
-			log.Info("stock cache hit", "path", stockPath)
-			res = &download.Result{Path: stockPath, SourceID: "cache"}
-		} else {
+			if err := download.AcceptCached(stockPath); err != nil {
+				log.Warn("stock cache rejected", "path", stockPath, "err", err)
+				// fall through to re-download
+			} else {
+				log.Info("stock cache hit", "path", stockPath)
+				res = &download.Result{Path: stockPath, SourceID: "cache"}
+			}
+		}
+		if res == nil {
 			log.Info("download attempt", "package", job.PackageID, "version", emptyAsLatest(ver))
 			// Prefer writing to the naive cache path name.
 			got, err := download.FetchFirst(ctx, reg, order, download.Request{

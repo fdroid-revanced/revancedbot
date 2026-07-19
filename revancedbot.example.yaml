@@ -12,6 +12,7 @@ repo_description: >
 
 downloaders:
   - apkpure
+  - apkmirror
 
 browser:
   # GHA Browserless service example:

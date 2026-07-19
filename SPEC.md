@@ -232,7 +232,7 @@ preflight host tools (java, keytool, fdroid, apksigner, aapt, …)
 
 ## 6. Downloaders
 
-Pluggable interface. First real source can follow the APKPure prototype path; more sources later.
+Pluggable interface. Built-ins: **apkpure** (direct HTTP) and **apkmirror** (HTML scrape). Order is configurable via `downloaders:` in `revancedbot.yaml` (default: apkpure then apkmirror).
 
 ### 6.1 Contract
 
@@ -240,7 +240,7 @@ Pluggable interface. First real source can follow the APKPure prototype path; mo
 
 **Output:** path + light metadata (source id, optional URL, sha256).
 
-**Trust model:** **trust the source**. No hard package forensics in the downloader; bad files fail at patch and are skipped.
+**Trust model:** **trust the source** for identity, but **reject garbage** in a common path (`ValidateAPK`): min size, ZIP/`PK` magic, not HTML, must contain `AndroidManifest.xml`. Used after every download and for stock cache hits (bad cache is deleted and re-fetched).
 
 **Artifact preference:**
 
