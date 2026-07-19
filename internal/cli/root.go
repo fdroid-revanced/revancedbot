@@ -35,6 +35,8 @@ func NewRoot() *cobra.Command {
 		PersistentPreRunE: func(cmd *cobra.Command, args []string) error {
 			h := logging.NewPlainHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelInfo})
 			ctx := logging.NewRootContext(slog.New(h))
+			// Keep slog.Default in sync so any leftover stdlib slog calls match.
+			slog.SetDefault(slog.New(h))
 			limits := limitsFromArgs(args)
 			sess, ctx := taskgroup.Enter(ctx, limits)
 			sessionMu.Lock()
@@ -127,18 +129,9 @@ func ctxOf(cmd *cobra.Command) context.Context {
 	return ctx
 }
 
-// schedule runs fn as a named task. Session.Close waits; return nil from RunE.
+// schedule runs fn as a named isolated task and waits for it (error returns to RunE).
+// Prefer this for subcommands that should show progress bars. Do not use for pure
+// stdout producers (keys generate) — short Unit tasks + TUI teardown can deadlock.
 func schedule(ctx context.Context, name string, pool taskgroup.PoolKind, fn func(context.Context, *taskgroup.Status) error) error {
-	g := taskgroup.MustFromContext(ctx)
-	g.Go(name, pool, fn)
-	return nil
-}
-
-// afterWait registers a hook to run after tasks finish (stdout prints, etc.).
-func afterWait(ctx context.Context, fn func() error) {
-	if s := taskgroup.SessionFrom(ctx); s != nil {
-		s.AfterWait(fn)
-	} else if fn != nil {
-		_ = fn()
-	}
+	return taskgroup.GoIsolated(ctx, name, pool, fn)
 }

@@ -1,13 +1,12 @@
 package cli
 
 import (
-	"context"
 	"fmt"
 
 	"github.com/lucasew/revancedbot/internal/signing"
 	"github.com/lucasew/revancedbot/internal/toolscheck"
 	"github.com/spf13/cobra"
-	"workspaced/pkg/taskgroup"
+	"workspaced/pkg/logging"
 )
 
 func newKeysCmd() *cobra.Command {
@@ -29,21 +28,19 @@ func newKeysGenerateCmd() *cobra.Command {
 			if err := toolscheck.Check(toolscheck.KeysOnly()); err != nil {
 				return err
 			}
+			// Intentionally no taskgroup.Go: starting the bubbletea Session UI for a
+			// short keytool run races on teardown (deadlock) and can corrupt the
+			// pasteable secret on stdout. Session still Enter/Close with zero tasks.
 			ctx := ctxOf(cmd)
-			return schedule(ctx, "keys-generate", taskgroup.CPU, func(ctx context.Context, s *taskgroup.Status) error {
-				defer s.Unit()()
-				s.Update("keytool")
-				enc, err := signing.Generate(alias)
-				if err != nil {
-					return err
-				}
-				afterWait(ctx, func() error {
-					fmt.Println(enc)
-					fmt.Fprintln(cmd.ErrOrStderr(), "# Paste the line above into the REVANCEDBOT_SIGNING secret.")
-					return nil
-				})
-				return nil
-			})
+			log := logging.GetLogger(ctx)
+			enc, err := signing.Generate(alias)
+			if err != nil {
+				return err
+			}
+			// Machine contract: exactly one line on stdout (the secret blob).
+			fmt.Println(enc)
+			log.Info("paste the line above into the REVANCEDBOT_SIGNING secret")
+			return nil
 		},
 	}
 	c.Flags().StringVar(&alias, "alias", "revancedbot", "keystore alias")
@@ -64,19 +61,13 @@ func newKeysValidateCmd() *cobra.Command {
 				return err
 			}
 			ctx := ctxOf(cmd)
-			return schedule(ctx, "keys-validate", taskgroup.CPU, func(ctx context.Context, s *taskgroup.Status) error {
-				defer s.Unit()()
-				s.Update("validate")
-				if err := a.LoadSigning(); err != nil {
-					return err
-				}
-				afterWait(ctx, func() error {
-					fmt.Println("ok: signing blob valid; keystore at", a.WS.KeystorePath)
-					fmt.Println("cache:", a.WS.Cache)
-					return nil
-				})
-				return nil
-			})
+			log := logging.GetLogger(ctx)
+			// Sync path: no Go/Unit — avoid TUI teardown flake on short work.
+			if err := a.LoadSigning(); err != nil {
+				return err
+			}
+			log.Info("signing blob valid", "keystore", a.WS.KeystorePath, "cache", a.WS.Cache)
+			return nil
 		},
 	}
 }

@@ -7,6 +7,7 @@ import (
 	"github.com/lucasew/revancedbot/internal/revanced"
 	"github.com/lucasew/revancedbot/internal/toolscheck"
 	"github.com/spf13/cobra"
+	"workspaced/pkg/logging"
 	"workspaced/pkg/taskgroup"
 )
 
@@ -28,6 +29,7 @@ func newPatchCmd() *cobra.Command {
 				return fmt.Errorf("--in and --out are required")
 			}
 			ctx := ctxOf(cmd)
+			log := logging.GetLogger(ctx)
 			return schedule(ctx, "patch", taskgroup.Control, func(ctx context.Context, s *taskgroup.Status) error {
 				s.Update("setup")
 				if err := a.LoadSigning(); err != nil {
@@ -36,11 +38,10 @@ func newPatchCmd() *cobra.Command {
 				if err := a.FetchTools(ctx); err != nil {
 					return err
 				}
-				var patches []string
-				err := taskgroup.GoIsolated(ctx, "patch:cli", taskgroup.CPU, func(ctx context.Context, s *taskgroup.Status) error {
+				return taskgroup.GoIsolated(ctx, "patch:cli", taskgroup.CPU, func(ctx context.Context, s *taskgroup.Status) error {
 					defer s.Unit()()
 					s.Update("revanced-cli")
-					ps, err := revanced.Patch(revanced.PatchOptions{
+					patches, err := revanced.Patch(revanced.PatchOptions{
 						CLIJar:                  a.WS.PatcherJAR(),
 						PatchesRVP:              a.WS.PatchesRVP(),
 						InputAPK:                in,
@@ -52,20 +53,12 @@ func newPatchCmd() *cobra.Command {
 					if err != nil {
 						return err
 					}
-					patches = ps
-					return nil
-				})
-				if err != nil {
-					return err
-				}
-				afterWait(ctx, func() error {
-					fmt.Println("ok", out)
+					log.Info("patch ok", "out", out, "patches", len(patches))
 					for _, p := range patches {
-						fmt.Println(p)
+						log.Info("patch applied", "name", p)
 					}
 					return nil
 				})
-				return nil
 			})
 		},
 	}

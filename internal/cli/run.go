@@ -1,9 +1,8 @@
 package cli
 
 import (
-	"fmt"
-
 	"github.com/spf13/cobra"
+	"workspaced/pkg/logging"
 )
 
 func newRunCmd() *cobra.Command {
@@ -34,12 +33,12 @@ func newSmokeCmd() *cobra.Command {
 				return err
 			}
 			ctx := ctxOf(cmd)
+			log := logging.GetLogger(ctx)
 			n, err := a.RunSmoke(ctx, maxOK)
 			if err != nil {
 				return err
 			}
-			// Prefer print after tasks; smoke already finished before return.
-			fmt.Printf("smoke ok: %d package(s) patched; fdroid updated\n", n)
+			log.Info("smoke ok", "packages", n)
 			return nil
 		},
 	}

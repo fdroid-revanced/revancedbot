@@ -7,6 +7,7 @@ import (
 	"github.com/lucasew/revancedbot/internal/download"
 	"github.com/lucasew/revancedbot/internal/workspace"
 	"github.com/spf13/cobra"
+	"workspaced/pkg/logging"
 	"workspaced/pkg/taskgroup"
 )
 
@@ -25,14 +26,14 @@ func newDownloadCmd() *cobra.Command {
 				return fmt.Errorf("--package is required")
 			}
 			ctx := ctxOf(cmd)
+			log := logging.GetLogger(ctx)
 			return schedule(ctx, "download:"+pkg, taskgroup.Control, func(ctx context.Context, s *taskgroup.Status) error {
 				s.Update(pkg)
 				path := a.WS.StockAPKPath(pkg, ver)
 				if workspace.CacheHit(path) && download.AcceptCached(path) == nil {
-					afterWait(ctx, func() error {
-						fmt.Printf("cache\t%s\n", path)
-						return nil
-					})
+					log.Info("stock cache hit", "path", path)
+					// Machine-readable line for scripts (stdout).
+					fmt.Printf("cache\t%s\n", path)
 					return nil
 				}
 				reg := download.DefaultRegistry()
@@ -47,10 +48,8 @@ func newDownloadCmd() *cobra.Command {
 				if err != nil {
 					return err
 				}
-				afterWait(ctx, func() error {
-					fmt.Printf("%s\t%s\t%s\n", res.SourceID, res.SHA256, res.Path)
-					return nil
-				})
+				log.Info("download ok", "source", res.SourceID, "sha256", res.SHA256, "path", res.Path)
+				fmt.Printf("%s\t%s\t%s\n", res.SourceID, res.SHA256, res.Path)
 				return nil
 			})
 		},

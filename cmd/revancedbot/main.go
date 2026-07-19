@@ -1,7 +1,7 @@
 package main
 
 import (
-	"fmt"
+	"log/slog"
 	"os"
 
 	"github.com/lucasew/revancedbot/internal/cli"
@@ -10,7 +10,7 @@ import (
 
 func main() {
 	if err := cli.NewRoot().Execute(); err != nil {
-		fmt.Fprintln(os.Stderr, "error:", err)
+		slog.Error("command failed", "err", err)
 		os.Exit(1)
 	}
 }

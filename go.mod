@@ -7,7 +7,7 @@ require (
 	github.com/spf13/cobra v1.10.2
 	github.com/spf13/viper v1.21.0
 	golang.org/x/oauth2 v0.30.0
-	workspaced v0.0.0-20260717021108-8ccc4a5325d1
+	workspaced v0.0.0-20260719144716-1e22086e8d2d
 )
 
 require (
@@ -45,4 +45,4 @@ require (
 	golang.org/x/text v0.38.0 // indirect
 )
 
-replace workspaced => github.com/lucasew/workspaced v0.0.0-20260717021108-8ccc4a5325d1
+replace workspaced => github.com/lucasew/workspaced v0.0.0-20260719144716-1e22086e8d2d

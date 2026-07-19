@@ -2,10 +2,10 @@ package cli
 
 import (
 	"context"
-	"fmt"
 
 	"github.com/lucasew/revancedbot/internal/toolscheck"
 	"github.com/spf13/cobra"
+	"workspaced/pkg/logging"
 	"workspaced/pkg/taskgroup"
 )
 
@@ -23,23 +23,20 @@ func newFDroidInitCmd() *cobra.Command {
 				return err
 			}
 			ctx := ctxOf(cmd)
-			return schedule(ctx, "fdroid-init", taskgroup.IO, func(ctx context.Context, s *taskgroup.Status) error {
-				defer s.Unit()()
-				s.Update("config")
-				if err := a.LoadSigning(); err != nil {
-					return err
-				}
-				if err := a.WriteFDroidConfig(); err != nil {
-					return err
-				}
-				afterWait(ctx, func() error {
-					fmt.Println("repo:", a.WS.Repo)
-					fmt.Println("config:", a.WS.FDroidConfig())
-					fmt.Println("keystore (cache):", a.WS.KeystorePath)
-					return nil
-				})
-				return nil
-			})
+			log := logging.GetLogger(ctx)
+			// Short local IO: no Go/Unit (avoids TUI teardown flake on tiny work).
+			if err := a.LoadSigning(); err != nil {
+				return err
+			}
+			if err := a.WriteFDroidConfig(); err != nil {
+				return err
+			}
+			log.Info("fdroid init ok",
+				"repo", a.WS.Repo,
+				"config", a.WS.FDroidConfig(),
+				"keystore", a.WS.KeystorePath,
+			)
+			return nil
 		},
 	}
 }
@@ -59,6 +56,7 @@ func newFDroidUpdateCmd() *cobra.Command {
 				return err
 			}
 			ctx := ctxOf(cmd)
+			log := logging.GetLogger(ctx)
 			return schedule(ctx, "fdroid-update-cmd", taskgroup.Control, func(ctx context.Context, s *taskgroup.Status) error {
 				s.Update("setup")
 				if err := a.LoadSigning(); err != nil {
@@ -67,7 +65,11 @@ func newFDroidUpdateCmd() *cobra.Command {
 				if err := a.WriteFDroidConfig(); err != nil {
 					return err
 				}
-				return a.FDroidUpdate(ctx, createMeta)
+				if err := a.FDroidUpdate(ctx, createMeta); err != nil {
+					return err
+				}
+				log.Info("fdroid update ok", "repo", a.WS.Repo)
+				return nil
 			})
 		},
 	}

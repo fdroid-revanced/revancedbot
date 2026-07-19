@@ -7,6 +7,7 @@ import (
 
 	"github.com/lucasew/revancedbot/internal/revanced"
 	"github.com/spf13/cobra"
+	"workspaced/pkg/logging"
 	"workspaced/pkg/taskgroup"
 )
 
@@ -21,6 +22,7 @@ func newListJobsCmd() *cobra.Command {
 				return err
 			}
 			ctx := ctxOf(cmd)
+			log := logging.GetLogger(ctx)
 			return schedule(ctx, "list-jobs", taskgroup.Control, func(ctx context.Context, s *taskgroup.Status) error {
 				s.Update("jobs")
 				if err := a.FetchTools(ctx); err != nil {
@@ -30,13 +32,11 @@ func newListJobsCmd() *cobra.Command {
 				if err != nil {
 					return err
 				}
-				lines := formatJobs(jobs)
-				afterWait(ctx, func() error {
-					for _, line := range lines {
-						fmt.Println(line)
-					}
-					return nil
-				})
+				log.Info("jobs listed", "count", len(jobs))
+				// Machine-readable table on stdout.
+				for _, line := range formatJobs(jobs) {
+					fmt.Println(line)
+				}
 				return nil
 			})
 		},
