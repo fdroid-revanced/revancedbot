@@ -2,7 +2,7 @@
 
 Builds a **simple binary F-Droid repository** of **ReVanced-patched** apps.
 
-**Status:** Go implementation in progress (see [SPEC.md](./SPEC.md)). The Python package under `revancedbot/` is a legacy prototype.
+Implementation is **Go**. Product and toolchain decisions: **[SPEC.md](./SPEC.md)**.
 
 ## Quick start (dev)
 
@@ -37,12 +37,9 @@ E2E env knobs:
 | `REVANCEDBOT_PATCHES_URL` | Direct URL to a `.rvp` |
 | `REVANCEDBOT_PATCHES_REPO` | Alternate GitHub `owner/repo` for patches |
 | `REVANCEDBOT_E2E_PACKAGE` | Force package id for download/patch step |
-| `REVANCEDBOT_E2E_STRICT=1` | Fail soft steps (APKPure / fdroid) instead of skipping |
+| `REVANCEDBOT_E2E_STRICT=1` | Fail soft steps instead of skipping |
 
 Patches: GitHub `ReVanced/revanced-patches` is often DMCA-blocked ([where-is-revanced-patches](https://github.com/ReVanced/where-is-revanced-patches)).  
 `fetch-tools` resolves the latest tag from **GitLab** (`gitlab.com/ReVanced/revanced-patches`), tries GitHub assets, then a community SourceForge mirror for the prebuilt `.rvp`.
+
 Consumer repos pin `revancedbot` from GitHub Releases via mise, provide `revancedbot.yaml`, and deploy the written F-Droid tree themselves.
-
-## Spec
-
-Product and toolchain decisions: **[SPEC.md](./SPEC.md)**.

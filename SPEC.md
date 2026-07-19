@@ -1,7 +1,7 @@
 # revancedbot — product & technical spec
 
 Status: agreed (product + toolchain + repo/cache layout grills, 2026-07-18; **progress / workspaced XP** grill, 2026-07-19).  
-Python under `revancedbot/` is a prototype only; the target implementation is **Go**.
+Implementation is **Go** (this repository).
 
 ## 1. Goal
 
@@ -431,9 +431,9 @@ No CI cache restore for `CACHE` required; default mkdtemp is intentional simplic
 
 ## 14. Gap map (current tree → target)
 
-| Area | Today (prototype) | Target |
+| Area | Prior / scaffold | Target |
 |------|-------------------|--------|
-| Language | Python | Go + Cobra/Viper |
+| Language | — | Go + Cobra/Viper |
 | Scope | Dump APKs to Pages from this repo | Simple binary F-Droid tree; deploy elsewhere |
 | Jobs | Many versions per package | One package → version walk → one success |
 | Failures | bare `except` | Isolate + structured skip |
