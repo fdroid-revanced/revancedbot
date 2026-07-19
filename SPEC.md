@@ -300,7 +300,7 @@ preflight host tools (java, keytool, fdroid, apksigner, aapt, …)
 
 ## 6. Downloaders
 
-Pluggable interface. Built-ins: **apkpure** (direct HTTP) and **apkmirror** (HTML scrape). Order is configurable via `downloaders:` in `revancedbot.yaml` (default: apkpure then apkmirror).
+Pluggable interface. Built-ins: **aptoide** (JSON API, PyAPKDownloader-style), **apkpure** (direct HTTP + versionCode URL trick), **apkmirror** (HTML scrape; plain APK only, bundles filtered). Order is configurable via `downloaders:` in `revancedbot.yaml` (default: aptoide → apkpure → apkmirror). Aurora/Play Store download is out of scope (token dispenser + protobuf).
 
 ### 6.1 Contract
 

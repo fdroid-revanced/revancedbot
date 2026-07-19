@@ -39,11 +39,12 @@ type Downloader interface {
 type Registry map[string]Downloader
 
 // DefaultOrder is the built-in fallback order when config omits downloaders.
-var DefaultOrder = []string{"apkpure", "apkmirror"}
+var DefaultOrder = []string{"aptoide", "apkpure", "apkmirror"}
 
 // DefaultRegistry returns built-in downloaders.
 func DefaultRegistry() Registry {
 	return Registry{
+		"aptoide":   &Aptoide{},
 		"apkpure":   &APKPure{},
 		"apkmirror": &APKMirror{},
 	}

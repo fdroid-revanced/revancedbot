@@ -11,6 +11,7 @@ repo_description: >
   ReVanced-patched applications (simple binary repository).
 
 downloaders:
+  - aptoide   # JSON API (PyAPKDownloader-style); often less rate-limited
   - apkpure
   - apkmirror
 
