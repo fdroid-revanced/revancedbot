@@ -10,9 +10,9 @@ import (
 	"github.com/lucasew/revancedbot/internal/app"
 	"github.com/lucasew/revancedbot/internal/config"
 	"github.com/lucasew/revancedbot/internal/version"
-	"github.com/spf13/cobra"
 	"github.com/lucasew/workspaced/pkg/logging"
 	"github.com/lucasew/workspaced/pkg/taskgroup"
+	"github.com/spf13/cobra"
 )
 
 var (
@@ -72,11 +72,19 @@ func NewRoot() *cobra.Command {
 	return root
 }
 
-// limitsFromArgs returns workspaced DefaultLimits, optionally overridden by
-// pool_io / pool_cpu / pool_internet in REPO/revancedbot.yaml when present.
-// Omitted or zero pool fields leave the workspaced default for that pool.
+// limitsFromArgs returns workspaced DefaultLimits with a tighter Internet cap,
+// optionally overridden by pool_* in REPO/revancedbot.yaml when present.
+//
+// Map pool trick: child tasks use PoolKind; Control is unlimited, Internet/IO/CPU
+// share the session semaphores. Packages Map stays Control (orchestrate only);
+// stock HTTP goes through httpclient.WithProgress as Internet tasks — so this
+// Internet limit is what caps concurrent APK downloads/scrapes (not the Map).
+// Do not put packages Map on Internet while downloads also take Internet or
+// you can deadlock (parent holds a slot, child HTTP wants another).
 func limitsFromArgs(args []string) taskgroup.Limits {
 	limits := taskgroup.DefaultLimits()
+	// Prefer fewer parallel store scrapes (403/429). workspaced default is 4.
+	limits.Internet = 2
 	if len(args) < 1 {
 		return limits
 	}
