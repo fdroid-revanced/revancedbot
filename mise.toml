@@ -4,6 +4,7 @@ go = "1.25.6"
 java = "temurin-21.0.7+6.0.LTS"
 goreleaser = "2.17.0"
 svu = "3.3.0"
+"pipx:fdroidserver" = "2.4.5"
 
 [tasks.build]
 run = "go build -o bin/revancedbot ./cmd/revancedbot"
