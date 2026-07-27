@@ -9,6 +9,8 @@ import (
 	"github.com/lucasew/workspaced/pkg/driver"
 	"github.com/lucasew/workspaced/pkg/driver/fetchurl"
 	"github.com/lucasew/workspaced/pkg/logging"
+
+	"github.com/lucasew/revancedbot/internal/osx"
 )
 
 // FetchURLs downloads the first successful URL into dest via the fetchurl driver
@@ -39,7 +41,7 @@ func FetchURLs(ctx context.Context, urls []string, dest, hashAlgo, hash string) 
 		})
 	})
 	if err != nil {
-		_ = os.Remove(dest)
+		osx.Remove(dest)
 		return err
 	}
 	st, err := f.Stat()
@@ -47,7 +49,7 @@ func FetchURLs(ctx context.Context, urls []string, dest, hashAlgo, hash string) 
 		return err
 	}
 	if st.Size() < 1024 {
-		_ = os.Remove(dest)
+		osx.Remove(dest)
 		return fmt.Errorf("download too small (%d bytes)", st.Size())
 	}
 	return nil

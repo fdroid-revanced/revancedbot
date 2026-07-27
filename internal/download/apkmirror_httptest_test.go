@@ -19,12 +19,17 @@ func TestAPKMirror_Fetch_httptest(t *testing.T) {
 	})
 
 	mux := http.NewServeMux()
+	write := func(w http.ResponseWriter, b []byte) {
+		if _, err := w.Write(b); err != nil {
+			panic(err)
+		}
+	}
 	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
 		switch {
 		case strings.Contains(r.URL.RawQuery, "com.example.app"):
-			_, _ = w.Write([]byte(`<a href="/apk/ex/app/app-1-2-3-release/">App 1.2.3</a>`))
+			write(w, []byte(`<a href="/apk/ex/app/app-1-2-3-release/">App 1.2.3</a>`))
 		case r.URL.Path == "/apk/ex/app/app-1-2-3-release/":
-			_, _ = w.Write([]byte(`
+			write(w, []byte(`
 				com.example.app
 				<div>universal Android 10+ nodpi</div>
 				<a href="/apk/ex/app/app-1-2-3-release/app-1-2-3-android-apk-download/">dl</a>
@@ -32,16 +37,16 @@ func TestAPKMirror_Fetch_httptest(t *testing.T) {
 				<a href="/apk/ex/app/app-1-2-3-release/app-1-2-3-2-android-apk-download/">dl2</a>
 			`))
 		case r.URL.Path == "/apk/ex/app/app-1-2-3-release/app-1-2-3-android-apk-download/":
-			_, _ = w.Write([]byte(`
+			write(w, []byte(`
 				<a class="downloadButton" href="/apk/ex/app/app-1-2-3-release/app-1-2-3-android-apk-download/download/?key=deadbeef">Download APK</a>
 			`))
 		case r.URL.Path == "/apk/ex/app/app-1-2-3-release/app-1-2-3-android-apk-download/download/":
-			_, _ = w.Write([]byte(`
+			write(w, []byte(`
 				<a id="download-link" rel="nofollow" href="/wp-content/themes/APKMirror/download.php?id=99&key=cafebabe">here</a>
 			`))
 		case r.URL.Path == "/wp-content/themes/APKMirror/download.php":
 			w.Header().Set("Content-Type", "application/vnd.android.package-archive")
-			_, _ = w.Write(apkBody)
+			write(w, apkBody)
 		default:
 			http.NotFound(w, r)
 		}
@@ -55,7 +60,7 @@ func TestAPKMirror_Fetch_httptest(t *testing.T) {
 
 	d := &APKMirror{Client: srv.Client()}
 	dest := t.TempDir()
-	res, err := d.Fetch(context.Background(), Request{PackageID: "com.example.app", Version: "1.2.3"}, dest)
+	res, err := d.Fetch(t.Context(), Request{PackageID: "com.example.app", Version: "1.2.3"}, dest)
 	if err != nil {
 		t.Fatalf("Fetch: %v", err)
 	}
@@ -85,7 +90,7 @@ func TestFetchFirst_validatesAndFallsThrough(t *testing.T) {
 		"ok":   &stubDL{id: "ok", body: good},
 	}
 	dest := t.TempDir()
-	res, err := FetchFirst(context.Background(), reg, []string{"html", "ok"}, Request{
+	res, err := FetchFirst(t.Context(), reg, []string{"html", "ok"}, Request{
 		PackageID: "com.example.app",
 		Version:   "1",
 	}, dest)
@@ -144,7 +149,9 @@ func mustStoredZipBytes(t *testing.T, files map[string][]byte) []byte {
 	if err := zw.Close(); err != nil {
 		t.Fatal(err)
 	}
-	_ = f.Close()
+	if err := f.Close(); err != nil {
+		t.Fatal(err)
+	}
 	b, err := os.ReadFile(p)
 	if err != nil {
 		t.Fatal(err)

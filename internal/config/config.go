@@ -1,7 +1,9 @@
 package config
 
 import (
+	"errors"
 	"fmt"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"strings"
@@ -44,7 +46,7 @@ func EnsureRepoDir(repo string) (string, error) {
 		}
 		return repoAbs, nil
 	}
-	if !os.IsNotExist(err) {
+	if !errors.Is(err, fs.ErrNotExist) {
 		return "", fmt.Errorf("repo %s: %w", repoAbs, err)
 	}
 	if err := os.MkdirAll(repoAbs, 0o755); err != nil {

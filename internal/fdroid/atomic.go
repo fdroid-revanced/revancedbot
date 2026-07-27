@@ -5,6 +5,8 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+
+	"github.com/lucasew/revancedbot/internal/osx"
 )
 
 // WriteFileAtomic writes data to path via a same-dir temp file + rename.
@@ -17,7 +19,7 @@ func WriteFileAtomic(path string, data []byte, perm os.FileMode) error {
 		return err
 	}
 	if err := os.Rename(tmp, path); err != nil {
-		_ = os.Remove(tmp)
+		osx.Remove(tmp)
 		return err
 	}
 	return nil
@@ -80,28 +82,28 @@ func publishDir(src, dst string) error {
 	tmp := filepath.Join(parent, "."+base+".new")
 	old := filepath.Join(parent, "."+base+".old")
 
-	_ = os.RemoveAll(tmp)
-	_ = os.RemoveAll(old)
+	osx.RemoveAll(tmp)
+	osx.RemoveAll(old)
 
 	if err := copyDir(src, tmp); err != nil {
-		_ = os.RemoveAll(tmp)
+		osx.RemoveAll(tmp)
 		return err
 	}
 
 	// Swap: dst -> old, tmp -> dst
 	if _, err := os.Stat(dst); err == nil {
 		if err := os.Rename(dst, old); err != nil {
-			_ = os.RemoveAll(tmp)
+			osx.RemoveAll(tmp)
 			return err
 		}
 	}
 	if err := os.Rename(tmp, dst); err != nil {
 		// best-effort restore
-		_ = os.Rename(old, dst)
-		_ = os.RemoveAll(tmp)
+		osx.Rename(old, dst)
+		osx.RemoveAll(tmp)
 		return err
 	}
-	_ = os.RemoveAll(old)
+	osx.RemoveAll(old)
 	return nil
 }
 
@@ -123,7 +125,7 @@ func copyDir(src, dst string) error {
 			if err != nil {
 				return err
 			}
-			_ = os.Remove(target)
+			osx.Remove(target)
 			return os.Symlink(link, target)
 		}
 		return copyFile(path, target, info.Mode().Perm())

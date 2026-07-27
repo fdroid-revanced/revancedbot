@@ -97,13 +97,13 @@ func findAapt() (string, error) {
 		if root == "" {
 			continue
 		}
-		matches, _ := filepath.Glob(filepath.Join(root, "build-tools", "*", "aapt"))
-		if len(matches) > 0 {
+		matches, err := filepath.Glob(filepath.Join(root, "build-tools", "*", "aapt"))
+		if err == nil && len(matches) > 0 {
 			// last match tends to be newer version string
 			return matches[len(matches)-1], nil
 		}
-		matches, _ = filepath.Glob(filepath.Join(root, "build-tools", "*", "aapt2"))
-		if len(matches) > 0 {
+		matches, err = filepath.Glob(filepath.Join(root, "build-tools", "*", "aapt2"))
+		if err == nil && len(matches) > 0 {
 			return matches[len(matches)-1], nil
 		}
 	}

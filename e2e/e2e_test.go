@@ -111,7 +111,10 @@ func TestE2E_RepoCacheLayout(t *testing.T) {
 	}
 	t.Logf("smoke packages ok: %d", n)
 	// Index is published into live REPO/repo after atomic PublishStage.
-	matches, _ := filepath.Glob(filepath.Join(a.WS.LiveRepoDir(), "index-v1.jar"))
+	matches, err := filepath.Glob(filepath.Join(a.WS.LiveRepoDir(), "index-v1.jar"))
+	if err != nil {
+		t.Fatal(err)
+	}
 	if len(matches) == 0 {
 		t.Fatal("expected index-v1.jar in REPO/repo after publish")
 	}
@@ -133,7 +136,9 @@ func TestE2E_CLI(t *testing.T) {
 	}
 	repo := t.TempDir()
 	cache := t.TempDir()
-	_ = os.WriteFile(filepath.Join(repo, "revancedbot.yaml"), []byte("repo_name: e2e\n"), 0o644)
+	if err := os.WriteFile(filepath.Join(repo, "revancedbot.yaml"), []byte("repo_name: e2e\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
 
 	// Blob is the only line on stdout; slog hints go to stderr.
 	cmdGen := exec.Command(bin, "keys", "generate")

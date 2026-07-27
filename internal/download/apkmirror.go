@@ -6,11 +6,12 @@ import (
 	"io"
 	"net/http"
 	"net/url"
-	"os"
 	"path/filepath"
 	"regexp"
 	"sort"
 	"strings"
+
+	"github.com/lucasew/revancedbot/internal/osx"
 )
 
 var apkmirrorBase = "https://www.apkmirror.com"
@@ -23,18 +24,11 @@ type APKMirror struct {
 
 func (a *APKMirror) ID() string { return "apkmirror" }
 
-func (a *APKMirror) client(ctx context.Context) *http.Client {
-	if a.Client != nil {
-		return a.Client
-	}
-	return httpClientJar(ctx)
-}
-
 func (a *APKMirror) Fetch(ctx context.Context, req Request, destDir string) (*Result, error) {
 	if strings.TrimSpace(req.PackageID) == "" {
 		return nil, fmt.Errorf("package id required")
 	}
-	cl := a.client(ctx)
+	cl := orClient(a.Client, httpClientJar(ctx))
 
 	releasePath, err := a.findRelease(ctx, cl, req)
 	if err != nil {
@@ -70,11 +64,11 @@ func (a *APKMirror) Fetch(ctx context.Context, req Request, destDir string) (*Re
 		return nil, err
 	}
 	if n < MinAPKBytes {
-		_ = os.Remove(path)
+		osx.Remove(path)
 		return nil, fmt.Errorf("download too small (%d bytes), likely not an APK", n)
 	}
 	if err := ValidateAPK(path); err != nil {
-		_ = os.Remove(path)
+		osx.Remove(path)
 		return nil, err
 	}
 

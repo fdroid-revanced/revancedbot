@@ -1,6 +1,8 @@
 package fdroid
 
 import (
+	"errors"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"testing"
@@ -28,7 +30,7 @@ func TestSanitizeAndValidateJSON(t *testing.T) {
 	if err := ValidateJSONTree(repo); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := os.Stat(filepath.Join(repo, "bad.json")); !os.IsNotExist(err) {
+	if _, err := os.Stat(filepath.Join(repo, "bad.json")); !errors.Is(err, fs.ErrNotExist) {
 		t.Fatal("bad.json should be gone")
 	}
 }
@@ -74,7 +76,7 @@ func TestSeedStageSkipsCorruptLive(t *testing.T) {
 	if _, err := os.Stat(filepath.Join(stage, "repo", "app.apk")); err != nil {
 		t.Fatal("apk should be seeded", err)
 	}
-	if _, err := os.Stat(filepath.Join(stage, "repo", "broken.json")); !os.IsNotExist(err) {
+	if _, err := os.Stat(filepath.Join(stage, "repo", "broken.json")); !errors.Is(err, fs.ErrNotExist) {
 		t.Fatal("broken json must not be seeded")
 	}
 }

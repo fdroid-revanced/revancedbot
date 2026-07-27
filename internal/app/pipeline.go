@@ -14,8 +14,10 @@ import (
 	"github.com/lucasew/revancedbot/internal/download"
 	"github.com/lucasew/revancedbot/internal/fdroid"
 	"github.com/lucasew/revancedbot/internal/netx"
+	"github.com/lucasew/revancedbot/internal/osx"
 	"github.com/lucasew/revancedbot/internal/revanced"
 	"github.com/lucasew/revancedbot/internal/signing"
+	"github.com/lucasew/revancedbot/internal/strutil"
 	"github.com/lucasew/revancedbot/internal/toolscheck"
 	"github.com/lucasew/revancedbot/internal/workspace"
 	"github.com/lucasew/workspaced/pkg/logging"
@@ -199,7 +201,7 @@ func (a *App) processVersion(ctx context.Context, job revanced.Job, ver string, 
 		res.Path = canonStock
 	}
 
-	outName := fmt.Sprintf("%s_%s_revanced.apk", sanitize(job.PackageID), sanitize(resolved))
+	outName := fmt.Sprintf("%s_%s_revanced.apk", strutil.Sanitize(job.PackageID), strutil.Sanitize(resolved))
 	outPath := filepath.Join(a.WS.Work, outName)
 	if err := os.MkdirAll(a.WS.Work, 0o755); err != nil {
 		return err
@@ -274,7 +276,7 @@ func moveFile(src, dst string) error {
 	if err := os.WriteFile(dst, b, 0o644); err != nil {
 		return err
 	}
-	_ = os.Remove(src)
+	osx.Remove(src)
 	return nil
 }
 
@@ -473,13 +475,4 @@ func emptyAsLatest(v string) string {
 		return "latest"
 	}
 	return v
-}
-
-func sanitize(s string) string {
-	return strings.Map(func(r rune) rune {
-		if (r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') || (r >= '0' && r <= '9') || r == '.' || r == '_' || r == '-' {
-			return r
-		}
-		return '_'
-	}, s)
 }

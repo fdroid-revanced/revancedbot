@@ -7,6 +7,8 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+
+	"github.com/lucasew/revancedbot/internal/osx"
 )
 
 // EnsureShims writes executable wrappers under binDir for apksigner so
@@ -32,13 +34,16 @@ func EnsureShims(binDir string) (string, error) {
 			if root == "" {
 				continue
 			}
-			matches, _ := filepath.Glob(filepath.Join(root, "build-tools", "*", "aapt"))
-			if len(matches) > 0 {
-				link := filepath.Join(binDir, "aapt")
-				_ = os.Remove(link)
-				_ = os.Symlink(matches[len(matches)-1], link)
-				break
+			matches, err := filepath.Glob(filepath.Join(root, "build-tools", "*", "aapt"))
+			if err != nil || len(matches) == 0 {
+				continue
 			}
+			link := filepath.Join(binDir, "aapt")
+			osx.Remove(link)
+			if err := os.Symlink(matches[len(matches)-1], link); err != nil {
+				return "", err
+			}
+			break
 		}
 	}
 	return binDir, nil

@@ -12,6 +12,8 @@ import (
 	"strings"
 
 	"github.com/lucasew/revancedbot/internal/netx"
+	"github.com/lucasew/revancedbot/internal/osx"
+	"github.com/lucasew/revancedbot/internal/strutil"
 	"github.com/lucasew/workspaced/pkg/logging"
 )
 
@@ -89,13 +91,13 @@ func tryDownloader(ctx context.Context, reg Registry, id string, req Request, de
 		return nil, fmt.Errorf("%s: %w", id, err)
 	}
 	if err := ValidateAPK(res.Path); err != nil {
-		_ = os.Remove(res.Path)
+		osx.Remove(res.Path)
 		return nil, fmt.Errorf("%s: reject apk: %w", id, err)
 	}
 	if res.SHA256 == "" {
 		sum, err := fileSHA256(res.Path)
 		if err != nil {
-			_ = os.Remove(res.Path)
+			osx.Remove(res.Path)
 			return nil, fmt.Errorf("%s: sha256: %w", id, err)
 		}
 		res.SHA256 = sum
@@ -106,7 +108,7 @@ func tryDownloader(ctx context.Context, reg Registry, id string, req Request, de
 // AcceptCached validates an existing stock cache file; on failure the path is removed.
 func AcceptCached(path string) error {
 	if err := ValidateAPK(path); err != nil {
-		_ = os.Remove(path)
+		osx.Remove(path)
 		return err
 	}
 	return nil
@@ -133,6 +135,14 @@ func httpClientJar(ctx context.Context) *http.Client {
 	return netx.ClientWithJar(ctx)
 }
 
+// orClient returns override when set, otherwise def.
+func orClient(override, def *http.Client) *http.Client {
+	if override == nil {
+		return def
+	}
+	return override
+}
+
 const browserUA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36"
 
 func writeBody(path string, r io.Reader) (n int64, sha string, err error) {
@@ -148,7 +158,7 @@ func writeBody(path string, r io.Reader) (n int64, sha string, err error) {
 	w := io.MultiWriter(f, h)
 	n, err = io.Copy(w, r)
 	if err != nil {
-		_ = os.Remove(path)
+		osx.Remove(path)
 		return n, "", err
 	}
 	return n, hex.EncodeToString(h.Sum(nil)), nil
@@ -158,18 +168,5 @@ func stockFileName(packageID, version string) string {
 	if version == "" {
 		version = "latest"
 	}
-	return fmt.Sprintf("%s_%s.apk", sanitize(packageID), sanitize(version))
-}
-
-func sanitize(s string) string {
-	b := make([]byte, 0, len(s))
-	for i := 0; i < len(s); i++ {
-		c := s[i]
-		if (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') || c == '.' || c == '_' || c == '-' {
-			b = append(b, c)
-		} else {
-			b = append(b, '_')
-		}
-	}
-	return string(b)
+	return fmt.Sprintf("%s_%s.apk", strutil.Sanitize(packageID), strutil.Sanitize(version))
 }

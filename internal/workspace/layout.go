@@ -4,6 +4,8 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+
+	"github.com/lucasew/revancedbot/internal/strutil"
 )
 
 // Layout splits durable F-Droid REPO from disposable CACHE.
@@ -103,18 +105,5 @@ func (l *Layout) StockAPKPath(packageID, version string) string {
 	if version == "" {
 		version = "latest"
 	}
-	return filepath.Join(l.StockAPKs, sanitize(packageID)+"_"+sanitize(version)+".apk")
-}
-
-func sanitize(s string) string {
-	b := make([]byte, 0, len(s))
-	for i := 0; i < len(s); i++ {
-		c := s[i]
-		if (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') || c == '.' || c == '_' || c == '-' {
-			b = append(b, c)
-		} else {
-			b = append(b, '_')
-		}
-	}
-	return string(b)
+	return filepath.Join(l.StockAPKs, strutil.Sanitize(packageID)+"_"+strutil.Sanitize(version)+".apk")
 }

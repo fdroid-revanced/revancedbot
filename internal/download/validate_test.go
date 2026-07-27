@@ -2,6 +2,8 @@ package download
 
 import (
 	"archive/zip"
+	"errors"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"testing"
@@ -73,7 +75,7 @@ func TestAcceptCached_removesBad(t *testing.T) {
 	if err := AcceptCached(p); err == nil {
 		t.Fatal("expected reject")
 	}
-	if _, err := os.Stat(p); !os.IsNotExist(err) {
+	if _, err := os.Stat(p); !errors.Is(err, fs.ErrNotExist) {
 		t.Fatal("expected file removed")
 	}
 }
@@ -89,11 +91,15 @@ func writeZipStored(path string, files map[string][]byte) error {
 		h := &zip.FileHeader{Name: name, Method: zip.Store}
 		w, err := zw.CreateHeader(h)
 		if err != nil {
-			_ = zw.Close()
+			if cErr := zw.Close(); cErr != nil {
+				return errors.Join(err, cErr)
+			}
 			return err
 		}
 		if _, err := w.Write(content); err != nil {
-			_ = zw.Close()
+			if cErr := zw.Close(); cErr != nil {
+				return errors.Join(err, cErr)
+			}
 			return err
 		}
 	}

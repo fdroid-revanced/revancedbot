@@ -12,6 +12,7 @@ import (
 
 	"github.com/google/go-github/v69/github"
 	"github.com/lucasew/revancedbot/internal/netx"
+	"github.com/lucasew/revancedbot/internal/osx"
 	"golang.org/x/oauth2"
 )
 
@@ -137,7 +138,10 @@ func gitlabReleases(ctx context.Context) ([]gitlabRelease, error) {
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
-		b, _ := io.ReadAll(io.LimitReader(resp.Body, 512))
+		b, err := io.ReadAll(io.LimitReader(resp.Body, 512))
+		if err != nil {
+			return nil, fmt.Errorf("gitlab releases: %s", resp.Status)
+		}
 		return nil, fmt.Errorf("gitlab releases: %s: %s", resp.Status, strings.TrimSpace(string(b)))
 	}
 	var rels []gitlabRelease
@@ -150,9 +154,8 @@ func gitlabReleases(ctx context.Context) ([]gitlabRelease, error) {
 func fetchPatchesGitHub(ctx context.Context, token, tag, dest string) error {
 	owner, repo := "ReVanced", "revanced-patches"
 	if alt := strings.TrimSpace(os.Getenv("REVANCEDBOT_PATCHES_REPO")); alt != "" {
-		parts := strings.SplitN(alt, "/", 2)
-		if len(parts) == 2 {
-			owner, repo = parts[0], parts[1]
+		if o, r, ok := strings.Cut(alt, "/"); ok {
+			owner, repo = o, r
 		}
 	}
 	client := githubClient(ctx, token)
@@ -244,7 +247,7 @@ func downloadGitHubAsset(ctx context.Context, client *github.Client, owner, repo
 		return err
 	}
 	if n < 1024 {
-		_ = os.Remove(dest)
+		osx.Remove(dest)
 		return fmt.Errorf("github asset too small (%d bytes)", n)
 	}
 	return nil
@@ -286,7 +289,7 @@ func downloadURLDirect(ctx context.Context, url, dest string) error {
 		return err
 	}
 	if n < 1024 {
-		_ = os.Remove(dest)
+		osx.Remove(dest)
 		return fmt.Errorf("GET %s: body too small (%d bytes)", url, n)
 	}
 	return nil

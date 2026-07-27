@@ -1,7 +1,9 @@
 package fdroid
 
 import (
+	"errors"
 	"fmt"
+	"io/fs"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -114,7 +116,10 @@ func SeedStage(stageRoot, liveRepo string) error {
 		return err
 	}
 	// Prefer clean live; strip bad JSON leftovers before deciding to seed.
-	_ = RemovePublishLeftovers(liveRepo)
+	// Live may be empty or partially cleaned; seed validation handles the rest.
+	if err := RemovePublishLeftovers(liveRepo); err != nil {
+		// continue with best-effort seed
+	}
 	if repoDir := filepath.Join(liveRepo, "repo"); dirExists(repoDir) {
 		if _, err := SanitizeJSONTree(repoDir); err != nil {
 			return fmt.Errorf("sanitize live repo JSON: %w", err)
@@ -129,7 +134,7 @@ func SeedStage(stageRoot, liveRepo string) error {
 		dst := filepath.Join(stageRoot, name)
 		st, err := os.Stat(src)
 		if err != nil {
-			if os.IsNotExist(err) {
+			if errors.Is(err, fs.ErrNotExist) {
 				continue
 			}
 			return err

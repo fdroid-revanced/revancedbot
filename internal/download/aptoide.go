@@ -6,9 +6,10 @@ import (
 	"fmt"
 	"io"
 	"net/http"
-	"os"
 	"path/filepath"
 	"strings"
+
+	"github.com/lucasew/revancedbot/internal/osx"
 )
 
 // Aptoide uses the public ws75/ws2 JSON APIs (same flow as PyAPKDownloader):
@@ -26,19 +27,12 @@ type Aptoide struct {
 
 func (a *Aptoide) ID() string { return "aptoide" }
 
-func (a *Aptoide) client(ctx context.Context) *http.Client {
-	if a.Client != nil {
-		return a.Client
-	}
-	return httpClient(ctx)
-}
-
 func (a *Aptoide) Fetch(ctx context.Context, req Request, destDir string) (*Result, error) {
 	pkg := strings.TrimSpace(req.PackageID)
 	if pkg == "" {
 		return nil, fmt.Errorf("package id required")
 	}
-	cl := a.client(ctx)
+	cl := orClient(a.Client, httpClient(ctx))
 
 	appID, err := a.findAppID(ctx, cl, pkg, req.Version)
 	if err != nil {
@@ -85,11 +79,11 @@ func (a *Aptoide) Fetch(ctx context.Context, req Request, destDir string) (*Resu
 		return nil, err
 	}
 	if n < MinAPKBytes {
-		_ = os.Remove(path)
+		osx.Remove(path)
 		return nil, fmt.Errorf("download too small (%d bytes)", n)
 	}
 	if err := ValidateAPK(path); err != nil {
-		_ = os.Remove(path)
+		osx.Remove(path)
 		return nil, err
 	}
 	return &Result{

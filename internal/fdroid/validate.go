@@ -2,7 +2,9 @@ package fdroid
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"strings"
@@ -91,7 +93,7 @@ func SanitizeJSONTree(root string) (int, error) {
 func RemovePublishLeftovers(root string) error {
 	entries, err := os.ReadDir(root)
 	if err != nil {
-		if os.IsNotExist(err) {
+		if errors.Is(err, fs.ErrNotExist) {
 			return nil
 		}
 		return err

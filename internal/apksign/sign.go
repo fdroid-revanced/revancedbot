@@ -55,8 +55,8 @@ func findApksignerJar() (string, error) {
 		if root == "" {
 			continue
 		}
-		matches, _ := filepath.Glob(filepath.Join(root, "build-tools", "*", "lib", "apksigner.jar"))
-		if len(matches) > 0 {
+		matches, err := filepath.Glob(filepath.Join(root, "build-tools", "*", "lib", "apksigner.jar"))
+		if err == nil && len(matches) > 0 {
 			// pick last (often newest version string)
 			return matches[len(matches)-1], nil
 		}
@@ -105,8 +105,8 @@ func HasAapt() bool {
 		if root == "" {
 			continue
 		}
-		matches, _ := filepath.Glob(filepath.Join(root, "build-tools", "*", "aapt"))
-		if len(matches) > 0 {
+		matches, err := filepath.Glob(filepath.Join(root, "build-tools", "*", "aapt"))
+		if err == nil && len(matches) > 0 {
 			return true
 		}
 	}
@@ -119,7 +119,10 @@ func PrependBuildToolsPATH() {
 		if root == "" {
 			continue
 		}
-		matches, _ := filepath.Glob(filepath.Join(root, "build-tools", "*"))
+		matches, err := filepath.Glob(filepath.Join(root, "build-tools", "*"))
+		if err != nil {
+			continue
+		}
 		for i := len(matches) - 1; i >= 0; i-- {
 			d := matches[i]
 			if st, err := os.Stat(d); err == nil && st.IsDir() {

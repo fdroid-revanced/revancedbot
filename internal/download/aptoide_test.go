@@ -1,7 +1,6 @@
 package download
 
 import (
-	"context"
 	"os"
 	"testing"
 )
@@ -37,7 +36,7 @@ func TestAptoideLive_bandcamp(t *testing.T) {
 		t.Skip("set REVANCEDBOT_NETWORK=1 for live Aptoide smoke")
 	}
 	dir := t.TempDir()
-	res, err := (&Aptoide{}).Fetch(context.Background(), Request{PackageID: "com.bandcamp.android"}, dir)
+	res, err := (&Aptoide{}).Fetch(t.Context(), Request{PackageID: "com.bandcamp.android"}, dir)
 	if err != nil {
 		t.Fatal(err)
 	}

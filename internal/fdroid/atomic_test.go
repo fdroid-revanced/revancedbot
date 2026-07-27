@@ -67,7 +67,10 @@ func TestPublish(t *testing.T) {
 	if err := Publish(stage, live); err != nil {
 		t.Fatal(err)
 	}
-	b, _ := os.ReadFile(auth)
+	b, err := os.ReadFile(auth)
+	if err != nil {
+		t.Fatal(err)
+	}
 	if string(b) != "ok\n" {
 		t.Fatalf("revancedbot.yaml should not be touched: %q", b)
 	}

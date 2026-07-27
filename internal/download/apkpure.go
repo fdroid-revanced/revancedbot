@@ -4,9 +4,10 @@ import (
 	"context"
 	"fmt"
 	"net/http"
-	"os"
 	"path/filepath"
 	"strings"
+
+	"github.com/lucasew/revancedbot/internal/osx"
 )
 
 // looksLikeBundleResponse rejects CDN replies that are clearly split/bundle packages.
@@ -35,13 +36,6 @@ type APKPure struct {
 }
 
 func (a *APKPure) ID() string { return "apkpure" }
-
-func (a *APKPure) client(ctx context.Context) *http.Client {
-	if a.Client != nil {
-		return a.Client
-	}
-	return httpClient(ctx)
-}
 
 func (a *APKPure) Fetch(ctx context.Context, req Request, destDir string) (*Result, error) {
 	ver := req.Version
@@ -92,7 +86,7 @@ func (a *APKPure) fetchURL(ctx context.Context, pkg, ver, url, destDir string) (
 	httpReq.Header.Set("User-Agent", browserUA)
 	httpReq.Header.Set("Accept", "*/*")
 
-	resp, err := a.client(ctx).Do(httpReq)
+	resp, err := orClient(a.Client, httpClient(ctx)).Do(httpReq)
 	if err != nil {
 		return nil, err
 	}
@@ -111,11 +105,11 @@ func (a *APKPure) fetchURL(ctx context.Context, pkg, ver, url, destDir string) (
 		return nil, err
 	}
 	if n < MinAPKBytes {
-		_ = os.Remove(path)
+		osx.Remove(path)
 		return nil, fmt.Errorf("download too small (%d bytes), likely not an APK", n)
 	}
 	if err := ValidateAPK(path); err != nil {
-		_ = os.Remove(path)
+		osx.Remove(path)
 		return nil, err
 	}
 

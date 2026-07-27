@@ -53,10 +53,9 @@ func ParseListVersions(data string) []Job {
 		}
 		if cur == nil {
 			// Sometimes format is "Package name: id" split differently
-			if strings.Contains(line, "Package name:") {
+			if _, id, ok := strings.Cut(line, "Package name:"); ok {
 				flush()
-				parts := strings.SplitN(line, "Package name:", 2)
-				cur = &Job{PackageID: strings.TrimSpace(parts[1])}
+				cur = &Job{PackageID: strings.TrimSpace(id)}
 			}
 			continue
 		}
