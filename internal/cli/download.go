@@ -23,7 +23,7 @@ func newDownloadCmd() *cobra.Command {
 				return err
 			}
 			if pkg == "" {
-				return fmt.Errorf("--package is required")
+				return fmt.Errorf("--package is required: %w", ErrBase)
 			}
 			ctx := ctxOf(cmd)
 			log := logging.GetLogger(ctx)

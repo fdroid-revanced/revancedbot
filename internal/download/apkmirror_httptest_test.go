@@ -118,7 +118,7 @@ func (s *stubDL) Fetch(ctx context.Context, req Request, destDir string) (*Resul
 		return nil, s.err
 	}
 	if s.body == nil {
-		return nil, fmt.Errorf("stub empty")
+		return nil, fmt.Errorf("stub empty: %w", ErrBase)
 	}
 	path := filepath.Join(destDir, stockFileName(req.PackageID, req.Version)+"."+s.id)
 	if err := os.WriteFile(path, s.body, 0o644); err != nil {

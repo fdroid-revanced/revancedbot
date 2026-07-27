@@ -26,7 +26,7 @@ func (a *APKMirror) ID() string { return "apkmirror" }
 
 func (a *APKMirror) Fetch(ctx context.Context, req Request, destDir string) (*Result, error) {
 	if strings.TrimSpace(req.PackageID) == "" {
-		return nil, fmt.Errorf("package id required")
+		return nil, fmt.Errorf("package id required: %w", ErrBase)
 	}
 	cl := orClient(a.Client, httpClientJar(ctx))
 
@@ -55,7 +55,7 @@ func (a *APKMirror) Fetch(ctx context.Context, req Request, destDir string) (*Re
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("download HTTP %s for %s", resp.Status, dlURL)
+		return nil, fmt.Errorf("download HTTP %s for %s: %w", resp.Status, dlURL, ErrBase)
 	}
 
 	path := filepath.Join(destDir, stockFileName(req.PackageID, req.Version))
@@ -65,7 +65,7 @@ func (a *APKMirror) Fetch(ctx context.Context, req Request, destDir string) (*Re
 	}
 	if n < MinAPKBytes {
 		osx.Remove(path)
-		return nil, fmt.Errorf("download too small (%d bytes), likely not an APK", n)
+		return nil, fmt.Errorf("download too small (%d bytes), likely not an APK: %w", n, ErrBase)
 	}
 	if err := ValidateAPK(path); err != nil {
 		osx.Remove(path)
@@ -101,7 +101,7 @@ func (a *APKMirror) getHTML(ctx context.Context, cl *http.Client, pageURL, refer
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
-		return "", fmt.Errorf("HTTP %s for %s", resp.Status, pageURL)
+		return "", fmt.Errorf("HTTP %s for %s: %w", resp.Status, pageURL, ErrBase)
 	}
 	// Cap HTML so a runaway page cannot fill memory.
 	const maxHTML = 8 << 20
@@ -139,7 +139,7 @@ func (a *APKMirror) findRelease(ctx context.Context, cl *http.Client, req Reques
 
 	links := uniqueInOrder(releaseHrefRe.FindAllStringSubmatch(html, -1))
 	if len(links) == 0 {
-		return "", fmt.Errorf("no release results for %q", req.PackageID)
+		return "", fmt.Errorf("no release results for %q: %w", req.PackageID, ErrBase)
 	}
 
 	if req.Version != "" {
@@ -149,7 +149,7 @@ func (a *APKMirror) findRelease(ctx context.Context, cl *http.Client, req Reques
 				return link, nil
 			}
 		}
-		return "", fmt.Errorf("no release matching version %q for %s", req.Version, req.PackageID)
+		return "", fmt.Errorf("no release matching version %q for %s: %w", req.Version, req.PackageID, ErrBase)
 	}
 	// Latest = first result row (site sorts newest first).
 	return links[0], nil
@@ -204,7 +204,7 @@ func (a *APKMirror) findVariant(ctx context.Context, cl *http.Client, releasePat
 		cands = append(cands, cand{path: path, score: scoreVariant(window, path), ctx: window})
 	}
 	if len(cands) == 0 {
-		return "", fmt.Errorf("no plain APK variants on %s (bundles/APKM only or none listed)", releasePath)
+		return "", fmt.Errorf("no plain APK variants on %s (bundles/APKM only or none listed): %w", releasePath, ErrBase)
 	}
 	sort.SliceStable(cands, func(i, j int) bool {
 		return cands[i].score > cands[j].score
@@ -274,7 +274,7 @@ func (a *APKMirror) resolveDownloadURL(ctx context.Context, cl *http.Client, var
 		if php := firstGroup(downloadPHPRe, html); php != "" {
 			return apkmirrorBase + php, nil
 		}
-		return "", fmt.Errorf("no download key on variant %s", variantPath)
+		return "", fmt.Errorf("no download key on variant %s: %w", variantPath, ErrBase)
 	}
 	keyURL := absAPKM(keyHref)
 
@@ -291,7 +291,7 @@ func (a *APKMirror) resolveDownloadURL(ctx context.Context, cl *http.Client, var
 		}
 	}
 	if php == "" {
-		return "", fmt.Errorf("no download.php on %s", keyURL)
+		return "", fmt.Errorf("no download.php on %s: %w", keyURL, ErrBase)
 	}
 	php = strings.ReplaceAll(php, "&amp;", "&")
 	return absAPKM(php), nil

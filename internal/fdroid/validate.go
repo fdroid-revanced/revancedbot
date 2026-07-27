@@ -22,7 +22,7 @@ func ValidateLayout(root string) error {
 			return fmt.Errorf("repo structure: missing %s: %w", name, err)
 		}
 		if !st.IsDir() {
-			return fmt.Errorf("repo structure: %s is not a directory", name)
+			return fmt.Errorf("repo structure: %s is not a directory: %w", name, ErrBase)
 		}
 	}
 	return nil
@@ -39,7 +39,7 @@ func ValidateJSONTree(root string) error {
 			// Leftover atomic publish dirs are not happy path.
 			base := info.Name()
 			if strings.HasPrefix(base, ".") && (strings.HasSuffix(base, ".new") || strings.HasSuffix(base, ".old")) {
-				return fmt.Errorf("repo structure: leftover publish dir %s", path)
+				return fmt.Errorf("repo structure: leftover publish dir %s: %w", path, ErrBase)
 			}
 			return nil
 		}
@@ -51,10 +51,10 @@ func ValidateJSONTree(root string) error {
 			return fmt.Errorf("repo structure: read %s: %w", path, err)
 		}
 		if len(strings.TrimSpace(string(data))) == 0 {
-			return fmt.Errorf("repo structure: empty JSON %s", path)
+			return fmt.Errorf("repo structure: empty JSON %s: %w", path, ErrBase)
 		}
 		if !json.Valid(data) {
-			return fmt.Errorf("repo structure: invalid JSON %s", path)
+			return fmt.Errorf("repo structure: invalid JSON %s: %w", path, ErrBase)
 		}
 		return nil
 	})
@@ -120,7 +120,7 @@ func ValidateStageAfterUpdate(stageRoot string) error {
 	}
 	cfg := filepath.Join(stageRoot, "config.yml")
 	if st, err := os.Stat(cfg); err != nil || st.IsDir() {
-		return fmt.Errorf("repo structure: stage missing config.yml")
+		return fmt.Errorf("repo structure: stage missing config.yml: %w", ErrBase)
 	}
 	repoDir := filepath.Join(stageRoot, "repo")
 	// Need at least one F-Droid index artifact.
@@ -133,7 +133,7 @@ func ValidateStageAfterUpdate(stageRoot string) error {
 		}
 	}
 	if !hasIndex {
-		return fmt.Errorf("repo structure: stage/repo missing index artifacts after fdroid update")
+		return fmt.Errorf("repo structure: stage/repo missing index artifacts after fdroid update: %w", ErrBase)
 	}
 	if err := ValidateJSONTree(repoDir); err != nil {
 		return err

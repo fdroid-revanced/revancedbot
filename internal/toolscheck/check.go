@@ -38,7 +38,7 @@ func DefaultRun() []Requirement {
 				if apksign.HasAapt() {
 					return nil
 				}
-				return fmt.Errorf("aapt not found")
+				return fmt.Errorf("aapt not found: %w", ErrBase)
 			},
 		},
 	}
@@ -76,5 +76,5 @@ func Check(reqs []Requirement) error {
 	if len(missing) == 0 {
 		return nil
 	}
-	return fmt.Errorf("missing required tools:\n  - %s", strings.Join(missing, "\n  - "))
+	return fmt.Errorf("missing required tools:\n  - %s: %w", strings.Join(missing, "\n  - "), ErrBase)
 }

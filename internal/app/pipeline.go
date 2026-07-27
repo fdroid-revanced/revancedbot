@@ -47,7 +47,7 @@ func New(cfg *config.Config) (*App, error) {
 // LoadSigning materializes the signing blob into CACHE.
 func (a *App) LoadSigning() error {
 	if a.Cfg.SigningBlob == "" {
-		return fmt.Errorf("REVANCEDBOT_SIGNING is required")
+		return fmt.Errorf("REVANCEDBOT_SIGNING is required: %w", ErrBase)
 	}
 	blob, err := signing.DecodeBlob(a.Cfg.SigningBlob)
 	if err != nil {
@@ -64,7 +64,7 @@ func (a *App) LoadSigning() error {
 // No live REPO mutation.
 func (a *App) PrepareStage() error {
 	if a.Blob == nil {
-		return fmt.Errorf("signing not loaded")
+		return fmt.Errorf("signing not loaded: %w", ErrBase)
 	}
 	if err := fdroid.SeedStage(a.WS.Stage, a.WS.Repo); err != nil {
 		return err
@@ -102,10 +102,10 @@ func (a *App) FetchTools(ctx context.Context) error {
 // ListJobs returns patch jobs.
 func (a *App) ListJobs() ([]revanced.Job, error) {
 	if !workspace.CacheHit(a.WS.PatcherJAR()) {
-		return nil, fmt.Errorf("missing CLI jar in cache; run fetch-tools first: %s", a.WS.PatcherJAR())
+		return nil, fmt.Errorf("missing CLI jar in cache; run fetch-tools first: %s: %w", a.WS.PatcherJAR(), ErrBase)
 	}
 	if !workspace.CacheHit(a.WS.PatchesRVP()) {
-		return nil, fmt.Errorf("missing patches in cache; run fetch-tools first: %s", a.WS.PatchesRVP())
+		return nil, fmt.Errorf("missing patches in cache; run fetch-tools first: %s: %w", a.WS.PatchesRVP(), ErrBase)
 	}
 	return revanced.ListJobs("java", a.WS.PatcherJAR(), a.WS.PatchesRVP())
 }
@@ -136,7 +136,7 @@ func (a *App) ProcessPackage(ctx context.Context, job revanced.Job) error {
 		return nil
 	}
 	if lastErr == nil {
-		lastErr = fmt.Errorf("no versions to try")
+		lastErr = fmt.Errorf("no versions to try: %w", ErrBase)
 	}
 	return fmt.Errorf("skip %s: %w", job.PackageID, lastErr)
 }
@@ -283,7 +283,7 @@ func moveFile(src, dst string) error {
 // FDroidUpdate runs fdroid update on the CACHE stage tree (not live REPO).
 func (a *App) FDroidUpdate(ctx context.Context, createMeta bool) error {
 	if a.Blob == nil {
-		return fmt.Errorf("signing not loaded")
+		return fmt.Errorf("signing not loaded: %w", ErrBase)
 	}
 	return taskgroup.GoIsolated(ctx, "rebuild F-Droid index", taskgroup.IO, func(ctx context.Context, s *taskgroup.Status) error {
 		defer s.Unit()()
@@ -459,7 +459,7 @@ func (a *App) RunSmoke(ctx context.Context, maxOK int) (ok int, err error) {
 	}
 	ok = int(okCount.Load())
 	if ok == 0 {
-		return 0, fmt.Errorf("no package succeeded download+patch (tried %d jobs)", len(jobs))
+		return 0, fmt.Errorf("no package succeeded download+patch (tried %d jobs): %w", len(jobs), ErrBase)
 	}
 	if err := a.FDroidUpdate(ctx, true); err != nil {
 		return ok, err

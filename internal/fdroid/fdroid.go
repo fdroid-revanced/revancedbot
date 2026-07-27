@@ -36,7 +36,7 @@ func WriteConfig(path string, meta RepoMeta, keystoreAbs string, blob *signing.B
 		meta.URL = "https://example.invalid/fdroid/repo"
 	}
 	if !filepath.IsAbs(keystoreAbs) {
-		return fmt.Errorf("keystore path must be absolute: %s", keystoreAbs)
+		return fmt.Errorf("keystore path must be absolute: %s: %w", keystoreAbs, ErrBase)
 	}
 
 	sdkLine := ""
@@ -165,10 +165,10 @@ func dirExists(p string) bool {
 func StageAPK(stageRoot, apkPath string) error {
 	dest := filepath.Join(stageRoot, "repo", filepath.Base(apkPath))
 	in, err := os.ReadFile(apkPath)
-	if err != nil {
-		return err
+	if err == nil {
+		return WriteFileAtomic(dest, in, 0o644)
 	}
-	return WriteFileAtomic(dest, in, 0o644)
+	return err
 }
 
 // WritePatchesMetadata writes metadata YAML into stage/metadata/.

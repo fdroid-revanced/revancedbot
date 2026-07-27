@@ -26,7 +26,7 @@ func newPatchCmd() *cobra.Command {
 				return err
 			}
 			if in == "" || out == "" {
-				return fmt.Errorf("--in and --out are required")
+				return fmt.Errorf("--in and --out are required: %w", ErrBase)
 			}
 			ctx := ctxOf(cmd)
 			log := logging.GetLogger(ctx)

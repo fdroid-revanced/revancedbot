@@ -60,13 +60,13 @@ func publishFile(src, dst string) error {
 		return err
 	}
 	if st.IsDir() {
-		return fmt.Errorf("%s is a directory", src)
+		return fmt.Errorf("%s is a directory: %w", src, ErrBase)
 	}
 	data, err := os.ReadFile(src)
-	if err != nil {
-		return err
+	if err == nil {
+		return WriteFileAtomic(dst, data, 0o600)
 	}
-	return WriteFileAtomic(dst, data, 0o600)
+	return err
 }
 
 func publishDir(src, dst string) error {
@@ -75,7 +75,7 @@ func publishDir(src, dst string) error {
 		return err
 	}
 	if !st.IsDir() {
-		return fmt.Errorf("%s is not a directory", src)
+		return fmt.Errorf("%s is not a directory: %w", src, ErrBase)
 	}
 	parent := filepath.Dir(dst)
 	base := filepath.Base(dst)

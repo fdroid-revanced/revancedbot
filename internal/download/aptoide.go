@@ -30,7 +30,7 @@ func (a *Aptoide) ID() string { return "aptoide" }
 func (a *Aptoide) Fetch(ctx context.Context, req Request, destDir string) (*Result, error) {
 	pkg := strings.TrimSpace(req.PackageID)
 	if pkg == "" {
-		return nil, fmt.Errorf("package id required")
+		return nil, fmt.Errorf("package id required: %w", ErrBase)
 	}
 	cl := orClient(a.Client, httpClient(ctx))
 
@@ -43,7 +43,7 @@ func (a *Aptoide) Fetch(ctx context.Context, req Request, destDir string) (*Resu
 		return nil, err
 	}
 	if looksLikeBundleURL(dlURL) {
-		return nil, fmt.Errorf("aptoide returned bundle/XAPK URL, skipping")
+		return nil, fmt.Errorf("aptoide returned bundle/XAPK URL, skipping: %w", ErrBase)
 	}
 
 	label := req.Version
@@ -67,10 +67,10 @@ func (a *Aptoide) Fetch(ctx context.Context, req Request, destDir string) (*Resu
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("download HTTP %s for %s", resp.Status, dlURL)
+		return nil, fmt.Errorf("download HTTP %s for %s: %w", resp.Status, dlURL, ErrBase)
 	}
 	if looksLikeBundleResponse(resp) {
-		return nil, fmt.Errorf("response looks like an APK bundle, not a single APK")
+		return nil, fmt.Errorf("response looks like an APK bundle, not a single APK: %w", ErrBase)
 	}
 
 	path := filepath.Join(destDir, stockFileName(pkg, label))
@@ -80,7 +80,7 @@ func (a *Aptoide) Fetch(ctx context.Context, req Request, destDir string) (*Resu
 	}
 	if n < MinAPKBytes {
 		osx.Remove(path)
-		return nil, fmt.Errorf("download too small (%d bytes)", n)
+		return nil, fmt.Errorf("download too small (%d bytes): %w", n, ErrBase)
 	}
 	if err := ValidateAPK(path); err != nil {
 		osx.Remove(path)
@@ -130,7 +130,7 @@ func (a *Aptoide) findAppID(ctx context.Context, cl *http.Client, pkg, version s
 		return 0, fmt.Errorf("getVersions json: %w", err)
 	}
 	if !strings.EqualFold(vr.Info.Status, "OK") || len(vr.List) == 0 {
-		return 0, fmt.Errorf("getVersions: no versions for %s (status=%s)", pkg, vr.Info.Status)
+		return 0, fmt.Errorf("getVersions: no versions for %s (status=%s): %w", pkg, vr.Info.Status, ErrBase)
 	}
 	want := strings.TrimSpace(version)
 	if want == "" || strings.EqualFold(want, "latest") {
@@ -147,7 +147,7 @@ func (a *Aptoide) findAppID(ctx context.Context, cl *http.Client, pkg, version s
 			return it.ID, nil
 		}
 	}
-	return 0, fmt.Errorf("getVersions: version %q not in first %d for %s", want, len(vr.List), pkg)
+	return 0, fmt.Errorf("getVersions: version %q not in first %d for %s: %w", want, len(vr.List), pkg, ErrBase)
 }
 
 type aptoideMetaResp struct {
@@ -181,7 +181,7 @@ func (a *Aptoide) metaDownload(ctx context.Context, cl *http.Client, appID int64
 			continue
 		}
 		if !strings.EqualFold(mr.Info.Status, "OK") {
-			err = fmt.Errorf("getMeta status %s", mr.Info.Status)
+			err = fmt.Errorf("getMeta status %s: %w", mr.Info.Status, ErrBase)
 			continue
 		}
 		dlURL = mr.Data.File.Path
@@ -189,13 +189,13 @@ func (a *Aptoide) metaDownload(ctx context.Context, cl *http.Client, appID int64
 			dlURL = mr.Data.File.PathAlt
 		}
 		if dlURL == "" {
-			err = fmt.Errorf("getMeta: empty download path for app_id=%d", appID)
+			err = fmt.Errorf("getMeta: empty download path for app_id=%d: %w", appID, ErrBase)
 			continue
 		}
 		return dlURL, mr.Data.File.VerName, nil
 	}
 	if err == nil {
-		err = fmt.Errorf("getMeta failed for app_id=%d", appID)
+		err = fmt.Errorf("getMeta failed for app_id=%d: %w", appID, ErrBase)
 	}
 	return "", "", err
 }
@@ -213,7 +213,7 @@ func (a *Aptoide) getJSON(ctx context.Context, cl *http.Client, url string) ([]b
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("HTTP %s for %s", resp.Status, url)
+		return nil, fmt.Errorf("HTTP %s for %s: %w", resp.Status, url, ErrBase)
 	}
 	const maxJSON = 4 << 20
 	return io.ReadAll(io.LimitReader(resp.Body, maxJSON))

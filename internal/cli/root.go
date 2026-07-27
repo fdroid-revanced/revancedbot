@@ -106,7 +106,7 @@ func limitsFromArgs(args []string) taskgroup.Limits {
 
 func loadApp(cmd *cobra.Command, args []string) (*app.App, error) {
 	if len(args) < 1 {
-		return nil, fmt.Errorf("missing REPO path (F-Droid simple-binary root)")
+		return nil, fmt.Errorf("missing REPO path (F-Droid simple-binary root): %w", ErrBase)
 	}
 	cfg, err := config.LoadFromRepo(args[0], cacheFlag, cfgFile)
 	if err != nil {

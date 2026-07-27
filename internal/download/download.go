@@ -76,15 +76,15 @@ func FetchFirst(ctx context.Context, reg Registry, order []string, req Request, 
 		return res, nil
 	}
 	if len(errs) == 0 {
-		return nil, fmt.Errorf("all downloaders failed")
+		return nil, fmt.Errorf("all downloaders failed: %w", ErrBase)
 	}
-	return nil, fmt.Errorf("all downloaders failed: %s", strings.Join(errs, "; "))
+	return nil, fmt.Errorf("all downloaders failed: %s: %w", strings.Join(errs, "; "), ErrBase)
 }
 
 func tryDownloader(ctx context.Context, reg Registry, id string, req Request, destDir string) (*Result, error) {
 	d, ok := reg[id]
 	if !ok {
-		return nil, fmt.Errorf("%s: unknown downloader", id)
+		return nil, fmt.Errorf("%s: unknown downloader: %w", id, ErrBase)
 	}
 	res, err := d.Fetch(ctx, req, destDir)
 	if err != nil {

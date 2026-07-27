@@ -20,7 +20,7 @@ func ValidateAPK(path string) error {
 		return fmt.Errorf("stat apk: %w", err)
 	}
 	if st.Size() < MinAPKBytes {
-		return fmt.Errorf("download too small (%d bytes), likely not an APK", st.Size())
+		return fmt.Errorf("download too small (%d bytes), likely not an APK: %w", st.Size(), ErrBase)
 	}
 
 	f, err := os.Open(path)
@@ -37,14 +37,14 @@ func ValidateAPK(path string) error {
 	head = head[:n]
 
 	if looksLikeHTML(head) {
-		return fmt.Errorf("download looks like HTML, not an APK")
+		return fmt.Errorf("download looks like HTML, not an APK: %w", ErrBase)
 	}
 	if n < 2 || head[0] != 'P' || head[1] != 'K' {
 		snip := string(head)
 		if len(snip) > 16 {
 			snip = snip[:16]
 		}
-		return fmt.Errorf("download is not a ZIP/APK (magic %q)", snip)
+		return fmt.Errorf("download is not a ZIP/APK (magic %q): %w", snip, ErrBase)
 	}
 
 	zr, err := zip.OpenReader(path)
@@ -59,7 +59,7 @@ func ValidateAPK(path string) error {
 			return nil
 		}
 	}
-	return fmt.Errorf("ZIP missing AndroidManifest.xml (not an APK)")
+	return fmt.Errorf("ZIP missing AndroidManifest.xml (not an APK): %w", ErrBase)
 }
 
 func looksLikeHTML(head []byte) bool {

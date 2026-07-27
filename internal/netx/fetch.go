@@ -18,10 +18,10 @@ import (
 // Pass label via WithLabel(ctx, "download ReVanced CLI") for TUI task names.
 func FetchURLs(ctx context.Context, urls []string, dest, hashAlgo, hash string) error {
 	if len(urls) == 0 {
-		return fmt.Errorf("no URLs")
+		return fmt.Errorf("no URLs: %w", ErrBase)
 	}
 	if !logging.ContextHasLogger(ctx) {
-		return fmt.Errorf("fetchurl requires logger on context")
+		return fmt.Errorf("fetchurl requires logger on context: %w", ErrBase)
 	}
 	if err := os.MkdirAll(filepath.Dir(dest), 0o755); err != nil {
 		return err
@@ -50,7 +50,7 @@ func FetchURLs(ctx context.Context, urls []string, dest, hashAlgo, hash string) 
 	}
 	if st.Size() < 1024 {
 		osx.Remove(dest)
-		return fmt.Errorf("download too small (%d bytes)", st.Size())
+		return fmt.Errorf("download too small (%d bytes): %w", st.Size(), ErrBase)
 	}
 	return nil
 }

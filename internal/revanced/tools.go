@@ -92,7 +92,7 @@ func FetchPatches(ctx context.Context, token, patchesPath string) error {
 		errs = append(errs, "sourceforge: "+err.Error())
 	}
 
-	return fmt.Errorf("patches %s unavailable: %s (see https://github.com/ReVanced/where-is-revanced-patches → GitLab; or set REVANCEDBOT_PATCHES_FILE)", tag, strings.Join(errs, "; "))
+	return fmt.Errorf("patches %s unavailable: %s (see https://github.com/ReVanced/where-is-revanced-patches → GitLab; or set REVANCEDBOT_PATCHES_FILE): %w", tag, strings.Join(errs, "; "), ErrBase)
 }
 
 func resolveLatestPatchesVersion(ctx context.Context) (tag, version string, err error) {
@@ -118,7 +118,7 @@ func resolveLatestPatchesVersion(ctx context.Context) (tag, version string, err 
 			return r.TagName, strings.TrimPrefix(r.TagName, "v"), nil
 		}
 	}
-	return "", "", fmt.Errorf("no releases on gitlab.com/ReVanced/revanced-patches")
+	return "", "", fmt.Errorf("no releases on gitlab.com/ReVanced/revanced-patches: %w", ErrBase)
 }
 
 type gitlabRelease struct {
@@ -140,9 +140,9 @@ func gitlabReleases(ctx context.Context) ([]gitlabRelease, error) {
 	if resp.StatusCode != http.StatusOK {
 		b, err := io.ReadAll(io.LimitReader(resp.Body, 512))
 		if err != nil {
-			return nil, fmt.Errorf("gitlab releases: %s", resp.Status)
+			return nil, fmt.Errorf("gitlab releases: %s: %w", resp.Status, ErrBase)
 		}
-		return nil, fmt.Errorf("gitlab releases: %s: %s", resp.Status, strings.TrimSpace(string(b)))
+		return nil, fmt.Errorf("gitlab releases: %s: %s: %w", resp.Status, strings.TrimSpace(string(b)), ErrBase)
 	}
 	var rels []gitlabRelease
 	if err := json.NewDecoder(resp.Body).Decode(&rels); err != nil {
@@ -191,7 +191,7 @@ func fetchPatchesGitHub(ctx context.Context, token, tag, dest string) error {
 		}
 	}
 	if asset == nil {
-		return fmt.Errorf("no .rvp on %s/%s %s", owner, repo, rel.GetTagName())
+		return fmt.Errorf("no .rvp on %s/%s %s: %w", owner, repo, rel.GetTagName(), ErrBase)
 	}
 	return downloadGitHubAsset(ctx, client, owner, repo, asset, dest)
 }
@@ -217,7 +217,7 @@ func downloadLatestGitHubAsset(ctx context.Context, client *github.Client, owner
 		}
 	}
 	if asset == nil {
-		return fmt.Errorf("no matching asset on %s/%s %s", owner, repo, rel.GetTagName())
+		return fmt.Errorf("no matching asset on %s/%s %s: %w", owner, repo, rel.GetTagName(), ErrBase)
 	}
 	return downloadGitHubAsset(ctx, client, owner, repo, asset, dest)
 }
@@ -248,7 +248,7 @@ func downloadGitHubAsset(ctx context.Context, client *github.Client, owner, repo
 	}
 	if n < 1024 {
 		osx.Remove(dest)
-		return fmt.Errorf("github asset too small (%d bytes)", n)
+		return fmt.Errorf("github asset too small (%d bytes): %w", n, ErrBase)
 	}
 	return nil
 }
@@ -274,7 +274,7 @@ func downloadURLDirect(ctx context.Context, url, dest string) error {
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
-		return fmt.Errorf("GET %s: %s", url, resp.Status)
+		return fmt.Errorf("GET %s: %s: %w", url, resp.Status, ErrBase)
 	}
 	if err := os.MkdirAll(filepath.Dir(dest), 0o755); err != nil {
 		return err
@@ -290,7 +290,7 @@ func downloadURLDirect(ctx context.Context, url, dest string) error {
 	}
 	if n < 1024 {
 		osx.Remove(dest)
-		return fmt.Errorf("GET %s: body too small (%d bytes)", url, n)
+		return fmt.Errorf("GET %s: body too small (%d bytes): %w", url, n, ErrBase)
 	}
 	return nil
 }

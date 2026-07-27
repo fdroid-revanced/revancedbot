@@ -61,7 +61,7 @@ func (a *APKPure) Fetch(ctx context.Context, req Request, destDir string) (*Resu
 		return res, nil
 	}
 	if lastErr == nil {
-		lastErr = fmt.Errorf("no apkpure URL tried")
+		lastErr = fmt.Errorf("no apkpure URL tried: %w", ErrBase)
 	}
 	return nil, lastErr
 }
@@ -92,11 +92,11 @@ func (a *APKPure) fetchURL(ctx context.Context, pkg, ver, url, destDir string) (
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("HTTP %s for %s", resp.Status, url)
+		return nil, fmt.Errorf("HTTP %s for %s: %w", resp.Status, url, ErrBase)
 	}
 	// /b/APK/ should be a single APK; reject bundle packaging if the CDN mislabels.
 	if looksLikeBundleResponse(resp) {
-		return nil, fmt.Errorf("response looks like an APK bundle/XAPK, not a single APK")
+		return nil, fmt.Errorf("response looks like an APK bundle/XAPK, not a single APK: %w", ErrBase)
 	}
 
 	path := filepath.Join(destDir, stockFileName(pkg, ver))
@@ -106,7 +106,7 @@ func (a *APKPure) fetchURL(ctx context.Context, pkg, ver, url, destDir string) (
 	}
 	if n < MinAPKBytes {
 		osx.Remove(path)
-		return nil, fmt.Errorf("download too small (%d bytes), likely not an APK", n)
+		return nil, fmt.Errorf("download too small (%d bytes), likely not an APK: %w", n, ErrBase)
 	}
 	if err := ValidateAPK(path); err != nil {
 		osx.Remove(path)

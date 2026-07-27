@@ -33,7 +33,7 @@ func (b *Blob) keystoreBytes() (string, error) {
 	if b.KeystoreP12B64 != "" {
 		return b.KeystoreP12B64, nil
 	}
-	return "", fmt.Errorf("signing blob missing keystore bytes")
+	return "", fmt.Errorf("signing blob missing keystore bytes: %w", ErrBase)
 }
 
 func (b *Blob) storeType() string {
@@ -64,7 +64,7 @@ func (b *Blob) Encode() (string, error) {
 func DecodeBlob(s string) (*Blob, error) {
 	s = strings.TrimSpace(s)
 	if s == "" {
-		return nil, fmt.Errorf("empty signing blob")
+		return nil, fmt.Errorf("empty signing blob: %w", ErrBase)
 	}
 	var raw []byte
 	if strings.HasPrefix(s, "{") {
@@ -81,13 +81,13 @@ func DecodeBlob(s string) (*Blob, error) {
 		return nil, fmt.Errorf("parse signing blob JSON: %w", err)
 	}
 	if b.V != blobVersion {
-		return nil, fmt.Errorf("unsupported signing blob version %d (want %d)", b.V, blobVersion)
+		return nil, fmt.Errorf("unsupported signing blob version %d (want %d): %w", b.V, blobVersion, ErrBase)
 	}
 	if _, err := b.keystoreBytes(); err != nil {
 		return nil, err
 	}
 	if b.StorePass == "" || b.KeyPass == "" || b.Alias == "" {
-		return nil, fmt.Errorf("signing blob missing required fields")
+		return nil, fmt.Errorf("signing blob missing required fields: %w", ErrBase)
 	}
 	return &b, nil
 }

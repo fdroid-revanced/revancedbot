@@ -77,19 +77,19 @@ func findApksignerJar() (string, error) {
 			}
 		}
 	}
-	return "", fmt.Errorf("apksigner.jar not found (set ANDROID_HOME or put build-tools on PATH)")
+	return "", fmt.Errorf("apksigner.jar not found (set ANDROID_HOME or put build-tools on PATH): %w", ErrBase)
 }
 
 // Available reports whether signing is possible.
 func Available() error {
 	if _, err := findApksignerJar(); err == nil {
 		if _, e := exec.LookPath("java"); e != nil {
-			return fmt.Errorf("java required to run apksigner.jar")
+			return fmt.Errorf("java required to run apksigner.jar: %w", ErrBase)
 		}
 		return nil
 	}
 	if _, err := exec.LookPath("apksigner"); err != nil {
-		return fmt.Errorf("apksigner not found on PATH and apksigner.jar not under ANDROID_HOME")
+		return fmt.Errorf("apksigner not found on PATH and apksigner.jar not under ANDROID_HOME: %w", ErrBase)
 	}
 	return nil
 }

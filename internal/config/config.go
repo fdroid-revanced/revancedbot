@@ -42,7 +42,7 @@ func EnsureRepoDir(repo string) (string, error) {
 	st, err := os.Stat(repoAbs)
 	if err == nil {
 		if !st.IsDir() {
-			return "", fmt.Errorf("repo is not a directory: %s", repoAbs)
+			return "", fmt.Errorf("repo is not a directory: %s: %w", repoAbs, ErrBase)
 		}
 		return repoAbs, nil
 	}
@@ -68,7 +68,7 @@ func LoadFromRepo(repo, cacheFlag, cfgFile string) (*Config, error) {
 		return nil, fmt.Errorf("repo %s: %w", repoAbs, err)
 	}
 	if !st.IsDir() {
-		return nil, fmt.Errorf("repo is not a directory: %s", repoAbs)
+		return nil, fmt.Errorf("repo is not a directory: %s: %w", repoAbs, ErrBase)
 	}
 
 	v := viper.New()

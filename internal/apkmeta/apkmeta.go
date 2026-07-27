@@ -41,7 +41,7 @@ func VersionName(apkPath string) (string, error) {
 		return "", err
 	}
 	if info.VersionName == "" {
-		return "", fmt.Errorf("empty versionName in %s", apkPath)
+		return "", fmt.Errorf("empty versionName in %s: %w", apkPath, ErrBase)
 	}
 	return info.VersionName, nil
 }
@@ -66,7 +66,7 @@ func ParseBadging(out string) (Info, error) {
 		break
 	}
 	if info.VersionName == "" && info.VersionCode == "" {
-		return Info{}, fmt.Errorf("no package: line with version in aapt output")
+		return Info{}, fmt.Errorf("no package: line with version in aapt output: %w", ErrBase)
 	}
 	return info, nil
 }
@@ -107,5 +107,5 @@ func findAapt() (string, error) {
 			return matches[len(matches)-1], nil
 		}
 	}
-	return "", fmt.Errorf("aapt/aapt2 not found (set ANDROID_HOME or put build-tools on PATH)")
+	return "", fmt.Errorf("aapt/aapt2 not found (set ANDROID_HOME or put build-tools on PATH): %w", ErrBase)
 }
