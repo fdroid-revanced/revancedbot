@@ -27,3 +27,31 @@ func TestParseBadging_missing(t *testing.T) {
 		t.Fatal("expected error")
 	}
 }
+
+func TestInfo_MatchesRequest(t *testing.T) {
+	info := Info{PackageID: "com.example.app", VersionName: "3.3.6", VersionCode: "9"}
+	if err := info.MatchesRequest("com.example.app", "3.3.6"); err != nil {
+		t.Fatal(err)
+	}
+	if err := info.MatchesRequest("com.example.app", "3.3"); err != nil {
+		t.Fatal(err)
+	}
+	if err := info.MatchesRequest("com.other.app", "3.3.6"); err == nil {
+		t.Fatal("expected package mismatch")
+	}
+	if err := info.MatchesRequest("com.example.app", "4.0.0"); err == nil {
+		t.Fatal("expected version mismatch")
+	}
+	if err := info.MatchesRequest("", ""); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestVersionMatches(t *testing.T) {
+	if !VersionMatches("3.3.6", "3.3.6") || !VersionMatches("3.3", "3.3.6") {
+		t.Fatal("expected match")
+	}
+	if VersionMatches("4.0.0", "3.3.6") {
+		t.Fatal("expected mismatch")
+	}
+}

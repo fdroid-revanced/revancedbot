@@ -46,6 +46,31 @@ func VersionName(apkPath string) (string, error) {
 	return info.VersionName, nil
 }
 
+// MatchesRequest reports whether this APK is the requested package/version.
+// Empty request or Info fields are not checked.
+func (info Info) MatchesRequest(packageID, version string) error {
+	if info.PackageID != "" && packageID != "" && info.PackageID != packageID {
+		return fmt.Errorf("package %q != requested %q: %w", info.PackageID, packageID, ErrBase)
+	}
+	if version != "" && info.VersionName != "" && !VersionMatches(version, info.VersionName) {
+		return fmt.Errorf("version %q != requested %q: %w", info.VersionName, version, ErrBase)
+	}
+	return nil
+}
+
+// VersionMatches reports whether a request label agrees with APK versionName.
+func VersionMatches(want, got string) bool {
+	want = strings.TrimSpace(want)
+	got = strings.TrimSpace(got)
+	if want == "" || got == "" {
+		return true
+	}
+	if want == got {
+		return true
+	}
+	return strings.HasPrefix(got, want) || strings.HasPrefix(want, got)
+}
+
 // ParseBadging parses aapt dump badging output.
 func ParseBadging(out string) (Info, error) {
 	var info Info

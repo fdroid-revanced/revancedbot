@@ -172,25 +172,41 @@ func (a *App) processVersion(ctx context.Context, job revanced.Job, ver string, 
 		res = got
 	}
 
+	info, err := requireStockIdentity(res.Path, job.PackageID, reqVer)
+	if err != nil {
+		log.Warn("stock identity rejected", "path", res.Path, "source", res.SourceID, "err", err)
+		osx.Remove(res.Path)
+		if res.SourceID != "cache" {
+			return err
+		}
+		label := emptyAsLatest(reqVer)
+		log.Info("download attempt", "package", job.PackageID, "version", label)
+		got, err := download.FetchFirst(netx.WithLabel(ctx, "download stock "+job.PackageID), reg, order, download.Request{
+			PackageID: job.PackageID,
+			Version:   reqVer,
+		}, a.WS.StockAPKs)
+		if err != nil {
+			return err
+		}
+		res = got
+		info, err = requireStockIdentity(res.Path, job.PackageID, reqVer)
+		if err != nil {
+			osx.Remove(res.Path)
+			return err
+		}
+	}
+
 	// Ground truth: versionName from the APK. "Any"/latest downloads must not
 	// stay labeled "latest" in the F-Droid tree.
 	resolved := reqVer
-	if info, err := apkmeta.Inspect(res.Path); err != nil {
-		log.Warn("apk version inspect failed; using request label", "err", err, "label", emptyAsLatest(reqVer))
-		if resolved == "" {
-			resolved = "latest"
-		}
-	} else {
-		if info.VersionName != "" {
-			resolved = info.VersionName
-		} else if info.VersionCode != "" {
-			resolved = info.VersionCode
-		}
-		if reqVer != "" && info.VersionName != "" && !versionMatches(reqVer, info.VersionName) {
-			log.Warn("requested version differs from APK", "want", reqVer, "got", info.VersionName)
-		}
-		log.Info("resolved apk version", "package", job.PackageID, "versionName", info.VersionName, "versionCode", info.VersionCode)
+	if info.VersionName != "" {
+		resolved = info.VersionName
+	} else if info.VersionCode != "" {
+		resolved = info.VersionCode
+	} else if resolved == "" {
+		resolved = "latest"
 	}
+	log.Info("resolved apk version", "package", job.PackageID, "versionName", info.VersionName, "versionCode", info.VersionCode)
 
 	// Canonical stock cache path under the real version name.
 	canonStock := a.WS.StockAPKPath(job.PackageID, resolved)
@@ -208,7 +224,7 @@ func (a *App) processVersion(ctx context.Context, job revanced.Job, ver string, 
 	}
 
 	var patches []string
-	err := taskgroup.GoIsolated(ctx, "patch "+job.PackageID, taskgroup.CPU, func(ctx context.Context, s *taskgroup.Status) error {
+	err = taskgroup.GoIsolated(ctx, "patch "+job.PackageID, taskgroup.CPU, func(ctx context.Context, s *taskgroup.Status) error {
 		defer s.Unit()()
 		s.Update("ReVanced CLI")
 		log.Info("patching", "in", res.Path, "out", outPath, "version", resolved)
@@ -246,17 +262,15 @@ func (a *App) processVersion(ctx context.Context, job revanced.Job, ver string, 
 	return nil
 }
 
-// versionMatches reports whether a request label agrees with APK versionName.
-func versionMatches(want, got string) bool {
-	want = strings.TrimSpace(want)
-	got = strings.TrimSpace(got)
-	if want == "" || got == "" {
-		return true
+func requireStockIdentity(path, packageID, version string) (apkmeta.Info, error) {
+	info, err := apkmeta.Inspect(path)
+	if err != nil {
+		return apkmeta.Info{}, fmt.Errorf("apk identity: %w", err)
 	}
-	if want == got {
-		return true
+	if err := info.MatchesRequest(packageID, version); err != nil {
+		return apkmeta.Info{}, err
 	}
-	return strings.HasPrefix(got, want) || strings.HasPrefix(want, got)
+	return info, nil
 }
 
 func moveFile(src, dst string) error {

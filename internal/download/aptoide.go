@@ -7,14 +7,30 @@ import (
 	"io"
 	"net/http"
 	"path/filepath"
+	"strconv"
 	"strings"
 
 	"github.com/lucasew/revancedbot/internal/osx"
+	"github.com/lucasew/workspaced/pkg/logging"
+)
+
+// Overridable for tests.
+var (
+	aptoideVersionsURL = "https://ws75.aptoide.com/api/7/app/getVersions/"
+	aptoideMetaURLs    = []string{
+		"https://ws2.aptoide.com/api/7/app/getMeta/",
+		"https://ws75.aptoide.com/api/7/app/getMeta/",
+	}
+)
+
+const (
+	aptoidePageSize = 40
+	aptoideMaxPages = 5
 )
 
 // Aptoide uses the public ws75/ws2 JSON APIs (same flow as PyAPKDownloader):
 //
-//	getVersions(package) → app id → getMeta(app_id) → file.path download.
+//	getVersions(package) → pick TRUSTED row (md5/size/ABI) → getMeta(app_id) → file.path.
 //
 // Prefer this for rate-limit resilience vs HTML scrapers.
 //
@@ -34,11 +50,11 @@ func (a *Aptoide) Fetch(ctx context.Context, req Request, destDir string) (*Resu
 	}
 	cl := orClient(a.Client, httpClient(ctx))
 
-	appID, err := a.findAppID(ctx, cl, pkg, req.Version)
+	cand, err := a.findVersion(ctx, cl, pkg, req.Version)
 	if err != nil {
 		return nil, err
 	}
-	dlURL, verName, err := a.metaDownload(ctx, cl, appID)
+	dlURL, verName, err := a.metaDownload(ctx, cl, cand.ID)
 	if err != nil {
 		return nil, err
 	}
@@ -51,40 +67,31 @@ func (a *Aptoide) Fetch(ctx context.Context, req Request, destDir string) (*Resu
 		label = verName
 	}
 	if label == "" {
+		label = cand.VerName
+	}
+	if label == "" {
 		label = "latest"
 	}
 
-	httpReq, err := http.NewRequestWithContext(ctx, http.MethodGet, dlURL, nil)
-	if err != nil {
-		return nil, err
-	}
-	httpReq.Header.Set("User-Agent", browserUA)
-	httpReq.Header.Set("Accept", "*/*")
-
-	resp, err := cl.Do(httpReq)
-	if err != nil {
-		return nil, err
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("download HTTP %s for %s: %w", resp.Status, dlURL, ErrBase)
-	}
-	if looksLikeBundleResponse(resp) {
-		return nil, fmt.Errorf("response looks like an APK bundle, not a single APK: %w", ErrBase)
+	if logging.ContextHasLogger(ctx) {
+		logging.GetLogger(ctx).Info("aptoide pick",
+			"package", pkg,
+			"version", cand.VerName,
+			"vercode", cand.VerCode,
+			"malware", cand.Malware,
+			"md5", cand.MD5,
+			"size", cand.Size,
+		)
 	}
 
 	path := filepath.Join(destDir, stockFileName(pkg, label))
-	n, sha, err := writeBody(path, resp.Body)
+	n, sha, err := saveAPK(ctx, cl, dlURL, path)
 	if err != nil {
 		return nil, err
 	}
-	if n < MinAPKBytes {
+	if err := verifyAdvertised(path, n, cand); err != nil {
 		osx.Remove(path)
-		return nil, fmt.Errorf("download too small (%d bytes): %w", n, ErrBase)
-	}
-	if err := ValidateAPK(path); err != nil {
-		osx.Remove(path)
-		return nil, err
+		return nil, fmt.Errorf("aptoide: %w", err)
 	}
 	return &Result{
 		Path:     path,
@@ -108,46 +115,156 @@ type aptoideVersionsResp struct {
 	Info struct {
 		Status string `json:"status"`
 	} `json:"info"`
-	List []struct {
-		ID   int64 `json:"id"`
-		File struct {
-			VerName string `json:"vername"`
-			VerCode int64  `json:"vercode"`
-		} `json:"file"`
-	} `json:"list"`
+	List []aptoideVersionItem `json:"list"`
 }
 
-func (a *Aptoide) findAppID(ctx context.Context, cl *http.Client, pkg, version string) (int64, error) {
-	// PyAPKDownloader: https://ws75.aptoide.com/api/7/app/getVersions/package_name=…/limit=…
-	url := fmt.Sprintf("https://ws75.aptoide.com/api/7/app/getVersions/package_name=%s/limit=%d",
-		pkg, 40)
+type aptoideVersionItem struct {
+	ID   int64 `json:"id"`
+	Size int64 `json:"size"`
+	File struct {
+		VerName  string `json:"vername"`
+		VerCode  int64  `json:"vercode"`
+		MD5      string `json:"md5sum"`
+		Filesize int64  `json:"filesize"`
+		Malware  struct {
+			Rank string `json:"rank"`
+		} `json:"malware"`
+		Hardware struct {
+			CPUs []string `json:"cpus"`
+		} `json:"hardware"`
+	} `json:"file"`
+}
+
+type aptoideVersion struct {
+	ID      int64
+	VerName string
+	VerCode int64
+	MD5     string
+	Size    int64
+	CPUs    []string
+	Malware string
+}
+
+func (it aptoideVersionItem) asVersion() aptoideVersion {
+	size := it.File.Filesize
+	if size == 0 {
+		size = it.Size
+	}
+	return aptoideVersion{
+		ID:      it.ID,
+		VerName: it.File.VerName,
+		VerCode: it.File.VerCode,
+		MD5:     it.File.MD5,
+		Size:    size,
+		CPUs:    it.File.Hardware.CPUs,
+		Malware: it.File.Malware.Rank,
+	}
+}
+
+func (a *Aptoide) findVersion(ctx context.Context, cl *http.Client, pkg, version string) (aptoideVersion, error) {
+	var lastErr error
+	for page := range aptoideMaxPages {
+		offset := page * aptoidePageSize
+		list, err := a.listVersions(ctx, cl, pkg, aptoidePageSize, offset)
+		if err != nil {
+			return aptoideVersion{}, err
+		}
+		if len(list) == 0 {
+			break
+		}
+		if picked, ok := pickAptoideVersion(list, version); ok {
+			return picked, nil
+		}
+		lastErr = fmt.Errorf("getVersions: version %q not on page offset=%d: %w", version, offset, ErrBase)
+		if version == "" || strings.EqualFold(version, "latest") {
+			// Newest page had no TRUSTED single-APK row.
+			break
+		}
+	}
+	if lastErr == nil {
+		lastErr = fmt.Errorf("getVersions: no versions for %s: %w", pkg, ErrBase)
+	}
+	return aptoideVersion{}, lastErr
+}
+
+func (a *Aptoide) listVersions(ctx context.Context, cl *http.Client, pkg string, limit, offset int) ([]aptoideVersion, error) {
+	url := fmt.Sprintf("%spackage_name=%s/limit=%d/offset=%d", aptoideVersionsURL, pkg, limit, offset)
 	body, err := a.getJSON(ctx, cl, url)
 	if err != nil {
-		return 0, fmt.Errorf("getVersions: %w", err)
+		return nil, fmt.Errorf("getVersions: %w", err)
 	}
 	var vr aptoideVersionsResp
 	if err := json.Unmarshal(body, &vr); err != nil {
-		return 0, fmt.Errorf("getVersions json: %w", err)
+		return nil, fmt.Errorf("getVersions json: %w", err)
 	}
-	if !strings.EqualFold(vr.Info.Status, "OK") || len(vr.List) == 0 {
-		return 0, fmt.Errorf("getVersions: no versions for %s (status=%s): %w", pkg, vr.Info.Status, ErrBase)
+	if !strings.EqualFold(vr.Info.Status, "OK") {
+		return nil, fmt.Errorf("getVersions: no versions for %s (status=%s): %w", pkg, vr.Info.Status, ErrBase)
 	}
-	want := strings.TrimSpace(version)
-	if want == "" || strings.EqualFold(want, "latest") {
-		return vr.List[0].ID, nil
-	}
+	out := make([]aptoideVersion, 0, len(vr.List))
 	for _, it := range vr.List {
-		if it.File.VerName == want {
-			return it.ID, nil
+		out = append(out, it.asVersion())
+	}
+	return out, nil
+}
+
+func pickAptoideVersion(list []aptoideVersion, want string) (aptoideVersion, bool) {
+	want = strings.TrimSpace(want)
+	if strings.EqualFold(want, "latest") {
+		want = ""
+	}
+	var ok []aptoideVersion
+	for _, it := range list {
+		if !aptoideAccept(it) {
+			continue
+		}
+		if want != "" && !aptoideVersionFits(want, it) {
+			continue
+		}
+		ok = append(ok, it)
+	}
+	if len(ok) == 0 {
+		return aptoideVersion{}, false
+	}
+	for _, it := range ok {
+		if aptoideUniversal(it) {
+			return it, true
 		}
 	}
-	// Soft match: version is a prefix (e.g. "3.3" vs "3.3.6").
-	for _, it := range vr.List {
-		if strings.HasPrefix(it.File.VerName, want+".") || strings.HasPrefix(it.File.VerName, want) {
-			return it.ID, nil
+	return ok[0], true
+}
+
+func aptoideAccept(it aptoideVersion) bool {
+	if it.ID == 0 {
+		return false
+	}
+	rank := strings.ToUpper(strings.TrimSpace(it.Malware))
+	if rank != "" && rank != "TRUSTED" {
+		return false
+	}
+	return true
+}
+
+func aptoideUniversal(it aptoideVersion) bool {
+	var arm64, armv7 bool
+	for _, c := range it.CPUs {
+		switch strings.ToLower(c) {
+		case "arm64-v8a", "arm64-v8a-hwasan":
+			arm64 = true
+		case "armeabi-v7a", "armeabi":
+			armv7 = true
 		}
 	}
-	return 0, fmt.Errorf("getVersions: version %q not in first %d for %s: %w", want, len(vr.List), pkg, ErrBase)
+	return arm64 && armv7
+}
+
+func aptoideVersionFits(want string, it aptoideVersion) bool {
+	if it.VerName == want {
+		return true
+	}
+	if isAllDigits(want) && strconv.FormatInt(it.VerCode, 10) == want {
+		return true
+	}
+	return strings.HasPrefix(it.VerName, want+".") || strings.HasPrefix(it.VerName, want)
 }
 
 type aptoideMetaResp struct {
@@ -164,11 +281,7 @@ type aptoideMetaResp struct {
 }
 
 func (a *Aptoide) metaDownload(ctx context.Context, cl *http.Client, appID int64) (dlURL, verName string, err error) {
-	// PyAPKDownloader uses ws2 for getMeta; ws75 also works for some packages.
-	for _, base := range []string{
-		"https://ws2.aptoide.com/api/7/app/getMeta/",
-		"https://ws75.aptoide.com/api/7/app/getMeta/",
-	} {
+	for _, base := range aptoideMetaURLs {
 		url := fmt.Sprintf("%sapp_id=%d", base, appID)
 		body, e := a.getJSON(ctx, cl, url)
 		if e != nil {

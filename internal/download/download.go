@@ -145,6 +145,40 @@ func orClient(override, def *http.Client) *http.Client {
 
 const browserUA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36"
 
+// saveAPK GETs url into dest, rejects bundle responses, and runs ValidateAPK.
+func saveAPK(ctx context.Context, cl *http.Client, url, dest string) (n int64, sha string, err error) {
+	httpReq, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+	if err != nil {
+		return 0, "", err
+	}
+	httpReq.Header.Set("User-Agent", browserUA)
+	httpReq.Header.Set("Accept", "*/*")
+	resp, err := cl.Do(httpReq)
+	if err != nil {
+		return 0, "", err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return 0, "", fmt.Errorf("download HTTP %s for %s: %w", resp.Status, url, ErrBase)
+	}
+	if looksLikeBundleResponse(resp) {
+		return 0, "", fmt.Errorf("response looks like an APK bundle, not a single APK: %w", ErrBase)
+	}
+	n, sha, err = writeBody(dest, resp.Body)
+	if err != nil {
+		return n, "", err
+	}
+	if n < MinAPKBytes {
+		osx.Remove(dest)
+		return n, "", fmt.Errorf("download too small (%d bytes), likely not an APK: %w", n, ErrBase)
+	}
+	if err := ValidateAPK(dest); err != nil {
+		osx.Remove(dest)
+		return n, sha, err
+	}
+	return n, sha, nil
+}
+
 func writeBody(path string, r io.Reader) (n int64, sha string, err error) {
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		return 0, "", err
