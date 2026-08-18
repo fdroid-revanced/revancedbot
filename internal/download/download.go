@@ -52,10 +52,31 @@ func DefaultRegistry() Registry {
 	}
 }
 
+// CanonicalPackage rewrites well-known mistaken ids (e.g. com.youtube.android).
+func CanonicalPackage(id string) string {
+	id = strings.TrimSpace(id)
+	if c, ok := packageAliases[id]; ok {
+		return c
+	}
+	return id
+}
+
+var packageAliases = map[string]string{
+	"com.youtube.android": "com.google.android.youtube",
+	"com.google.youtube":  "com.google.android.youtube",
+	"com.youtube.music":   "com.google.android.apps.youtube.music",
+}
+
 // FetchFirst tries downloaders in order until one succeeds and ValidateAPK passes.
 // No per-source taskgroup Map — progress stays on the parent "apks" aggregate bar
 // plus httpclient fetch bars for real network I/O.
 func FetchFirst(ctx context.Context, reg Registry, order []string, req Request, destDir string) (*Result, error) {
+	if canon := CanonicalPackage(req.PackageID); canon != req.PackageID {
+		if logging.ContextHasLogger(ctx) {
+			logging.GetLogger(ctx).Info("canonical package", "from", req.PackageID, "to", canon)
+		}
+		req.PackageID = canon
+	}
 	if len(order) == 0 {
 		order = DefaultOrder
 	}

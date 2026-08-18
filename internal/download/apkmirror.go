@@ -125,11 +125,30 @@ var downloadKeyHrefRe = regexp.MustCompile(`href="([^"]+/download/\?key=[a-f0-9]
 var downloadPHPRe = regexp.MustCompile(`href="(/wp-content/themes/APKMirror/download\.php\?id=\d+&key=[a-f0-9]+)"`)
 
 func (a *APKMirror) findRelease(ctx context.Context, cl *http.Client, req Request) (string, error) {
-	// Search by package id; results are release rows for matching apps.
+	queries := []string{req.PackageID}
+	if req.Version != "" {
+		// Package-only search is newest-first and drops old versions off page 1.
+		queries = []string{req.PackageID + " " + req.Version, req.PackageID}
+	}
+	var lastErr error
+	for _, q := range queries {
+		link, err := a.searchRelease(ctx, cl, q, req.Version)
+		if err == nil {
+			return link, nil
+		}
+		lastErr = err
+	}
+	if lastErr == nil {
+		lastErr = fmt.Errorf("no release results for %q: %w", req.PackageID, ErrBase)
+	}
+	return "", lastErr
+}
+
+func (a *APKMirror) searchRelease(ctx context.Context, cl *http.Client, query, version string) (string, error) {
 	q := url.Values{}
 	q.Set("post_type", "app_release")
 	q.Set("searchtype", "apk")
-	q.Set("s", req.PackageID)
+	q.Set("s", query)
 	searchURL := apkmirrorBase + "/?" + q.Encode()
 
 	html, err := a.getHTML(ctx, cl, searchURL, apkmirrorBase+"/")
@@ -139,17 +158,17 @@ func (a *APKMirror) findRelease(ctx context.Context, cl *http.Client, req Reques
 
 	links := uniqueInOrder(releaseHrefRe.FindAllStringSubmatch(html, -1))
 	if len(links) == 0 {
-		return "", fmt.Errorf("no release results for %q: %w", req.PackageID, ErrBase)
+		return "", fmt.Errorf("no release results for %q: %w", query, ErrBase)
 	}
 
-	if req.Version != "" {
-		want := versionSlug(req.Version)
+	if version != "" {
+		want := versionSlug(version)
 		for _, link := range links {
 			if strings.Contains(link, want) {
 				return link, nil
 			}
 		}
-		return "", fmt.Errorf("no release matching version %q for %s: %w", req.Version, req.PackageID, ErrBase)
+		return "", fmt.Errorf("no release matching version %q for %s: %w", version, query, ErrBase)
 	}
 	// Latest = first result row (site sorts newest first).
 	return links[0], nil

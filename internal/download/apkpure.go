@@ -53,11 +53,15 @@ func (a *APKPure) Fetch(ctx context.Context, req Request, destDir string) (*Resu
 	}
 	cl := orClient(a.Client, httpClient(ctx))
 
-	if url, err := a.listAPKURL(ctx, cl, req.PackageID, ver); err == nil && url != "" {
+	var errs []string
+	if url, err := a.listAPKURL(ctx, cl, req.PackageID, ver); err != nil {
+		errs = append(errs, err.Error())
+	} else if url != "" {
 		res, err := a.fetchURL(ctx, cl, req.PackageID, label, url, destDir)
 		if err == nil {
 			return res, nil
 		}
+		errs = append(errs, err.Error())
 	}
 
 	// Legacy guessed URLs if the listing is missing or the CDN URL 404s.
@@ -68,19 +72,18 @@ func (a *APKPure) Fetch(ctx context.Context, req Request, destDir string) (*Resu
 		urls = append(urls, fmt.Sprintf("https://d.apkpure.com/b/APK/%s?versionCode=%s", req.PackageID, ver))
 	}
 
-	var lastErr error
 	for _, url := range urls {
 		res, err := a.fetchURL(ctx, cl, req.PackageID, label, url, destDir)
 		if err != nil {
-			lastErr = err
+			errs = append(errs, err.Error())
 			continue
 		}
 		return res, nil
 	}
-	if lastErr == nil {
-		lastErr = fmt.Errorf("no apkpure URL tried: %w", ErrBase)
+	if len(errs) == 0 {
+		return nil, fmt.Errorf("no apkpure URL tried: %w", ErrBase)
 	}
-	return nil, lastErr
+	return nil, fmt.Errorf("%s: %w", strings.Join(errs, "; "), ErrBase)
 }
 
 func (a *APKPure) listAPKURL(ctx context.Context, cl *http.Client, pkg, version string) (string, error) {

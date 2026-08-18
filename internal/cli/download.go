@@ -6,9 +6,9 @@ import (
 
 	"github.com/lucasew/revancedbot/internal/download"
 	"github.com/lucasew/revancedbot/internal/workspace"
-	"github.com/spf13/cobra"
 	"github.com/lucasew/workspaced/pkg/logging"
 	"github.com/lucasew/workspaced/pkg/taskgroup"
+	"github.com/spf13/cobra"
 )
 
 func newDownloadCmd() *cobra.Command {
@@ -25,6 +25,7 @@ func newDownloadCmd() *cobra.Command {
 			if pkg == "" {
 				return fmt.Errorf("--package is required: %w", ErrBase)
 			}
+			pkg = download.CanonicalPackage(pkg)
 			ctx := ctxOf(cmd)
 			log := logging.GetLogger(ctx)
 			return schedule(ctx, "download stock "+pkg, taskgroup.Control, func(ctx context.Context, s *taskgroup.Status) error {

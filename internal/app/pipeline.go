@@ -144,6 +144,7 @@ func (a *App) ProcessPackage(ctx context.Context, job revanced.Job) error {
 func (a *App) processVersion(ctx context.Context, job revanced.Job, ver string, reg download.Registry, order []string) error {
 	log := logging.GetLogger(ctx)
 	// Request label for downloaders (empty = source "latest" / newest release).
+	job.PackageID = download.CanonicalPackage(job.PackageID)
 	reqVer := ver
 	stockPath := a.WS.StockAPKPath(job.PackageID, reqVer)
 	var res *download.Result

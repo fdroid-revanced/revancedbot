@@ -80,7 +80,7 @@ func LoadFromRepo(repo, cacheFlag, cfgFile string) (*Config, error) {
 	v.SetDefault("repo_name", "ReVanced F-Droid Repo")
 	v.SetDefault("repo_url", "https://example.invalid/fdroid/repo")
 	v.SetDefault("repo_description", "ReVanced-patched apps (simple binary repository).")
-	v.SetDefault("downloaders", []string{"apkpure", "apkmirror"})
+	// Empty = CLI/pipeline use download.DefaultOrder (aptoide, apkpure, apkmirror).
 	v.SetDefault("log_level", "info")
 
 	if cfgFile != "" {

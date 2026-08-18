@@ -24,6 +24,17 @@ func TestEnsureRepoDir_creates(t *testing.T) {
 	}
 }
 
+func TestLoadFromRepo_emptyDownloaders(t *testing.T) {
+	repo := t.TempDir()
+	cfg, err := LoadFromRepo(repo, t.TempDir(), "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(cfg.DownloaderOrder) != 0 {
+		t.Fatalf("want empty downloaders so DefaultOrder applies, got %v", cfg.DownloaderOrder)
+	}
+}
+
 func TestEnsureRepoDir_rejectsFile(t *testing.T) {
 	base := t.TempDir()
 	p := filepath.Join(base, "file")
