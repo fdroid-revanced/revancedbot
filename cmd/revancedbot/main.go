@@ -9,7 +9,13 @@ import (
 )
 
 func main() {
-	if err := cli.NewRoot().Execute(); err != nil {
+	err := cli.NewRoot().Execute()
+	// RunE errors skip PersistentPostRun; Close anyway so the TUI overlay
+	// does not swallow slog.Error on the way out.
+	if closeErr := cli.CloseSession(); err == nil {
+		err = closeErr
+	}
+	if err != nil {
 		slog.Error("command failed", "err", err)
 		os.Exit(1)
 	}

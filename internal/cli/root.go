@@ -44,14 +44,7 @@ func NewRoot() *cobra.Command {
 			return nil
 		},
 		PersistentPostRunE: func(cmd *cobra.Command, args []string) error {
-			sessionMu.Lock()
-			sess := session
-			session = nil
-			sessionMu.Unlock()
-			if sess != nil {
-				return sess.Close()
-			}
-			return nil
+			return CloseSession()
 		},
 	}
 
@@ -102,6 +95,20 @@ func limitsFromArgs(args []string) taskgroup.Limits {
 		limits.Internet = cfg.PoolInternet
 	}
 	return limits
+}
+
+// CloseSession tears down the taskgroup Session (TUI + stderr overlay).
+// Cobra skips PersistentPostRun when RunE fails, so main must call this
+// after Execute as well. Idempotent.
+func CloseSession() error {
+	sessionMu.Lock()
+	sess := session
+	session = nil
+	sessionMu.Unlock()
+	if sess != nil {
+		return sess.Close()
+	}
+	return nil
 }
 
 func loadApp(cmd *cobra.Command, args []string) (*app.App, error) {

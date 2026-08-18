@@ -103,10 +103,18 @@ func (a *Aptoide) Fetch(ctx context.Context, req Request, destDir string) (*Resu
 
 func looksLikeBundleURL(u string) bool {
 	low := strings.ToLower(u)
-	for _, mark := range []string{".apkm", ".xapk", ".apks", "apkm", "xapk", "apks", "bundle"} {
+	for _, mark := range []string{".apkm", ".xapk", ".apks", "xapk", "bundle", "_apkmir"} {
 		if strings.Contains(low, mark) {
 			return true
 		}
+	}
+	// "apkm" but not the APKMirror hostname.
+	if strings.Contains(low, "apkm") && !strings.Contains(low, "apkmirror") {
+		return true
+	}
+	// APKMirror split packages: ..._4arch_7dpi_24lang_....
+	if strings.Contains(low, "arch_") && (strings.Contains(low, "dpi_") || strings.Contains(low, "lang_")) {
+		return true
 	}
 	return false
 }

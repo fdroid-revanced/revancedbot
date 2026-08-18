@@ -42,6 +42,9 @@ func (a *APKMirror) Fetch(ctx context.Context, req Request, destDir string) (*Re
 	if err != nil {
 		return nil, err
 	}
+	if looksLikeBundleURL(dlURL) {
+		return nil, fmt.Errorf("download URL looks like a bundle/APKM, skipping: %w", ErrBase)
+	}
 
 	httpReq, err := http.NewRequestWithContext(ctx, http.MethodGet, dlURL, nil)
 	if err != nil {
@@ -56,6 +59,9 @@ func (a *APKMirror) Fetch(ctx context.Context, req Request, destDir string) (*Re
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
 		return nil, fmt.Errorf("download HTTP %s for %s: %w", resp.Status, dlURL, ErrBase)
+	}
+	if looksLikeBundleResponse(resp) {
+		return nil, fmt.Errorf("response looks like an APK bundle, not a single APK: %w", ErrBase)
 	}
 
 	path := filepath.Join(destDir, stockFileName(req.PackageID, req.Version))

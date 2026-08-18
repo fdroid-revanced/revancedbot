@@ -21,6 +21,9 @@ func TestLooksLikeBundleURL(t *testing.T) {
 	if looksLikeBundleURL("https://pool.apk.aptoide.com/store/app.apk") {
 		t.Fatal("plain apk must pass")
 	}
+	if !looksLikeBundleURL("https://cdn/com.google.android.youtube_20.40.45-1_4arch_7dpi_24lang_abc_apkmir") {
+		t.Fatal("apkmir split name")
+	}
 }
 
 func TestIsAllDigits(t *testing.T) {
