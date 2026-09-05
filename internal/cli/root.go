@@ -141,7 +141,7 @@ type loadOpts struct {
 	requireDoc bool
 }
 
-func loadApp(args []string, opts loadOpts) (*app.App, error) {
+func loadApp(cmd *cobra.Command, args []string, opts loadOpts) (*app.App, error) {
 	if len(args) < 1 {
 		return nil, fmt.Errorf("missing REPO path (F-Droid simple-binary root): %w", ErrBase)
 	}
@@ -158,8 +158,10 @@ func loadApp(args []string, opts loadOpts) (*app.App, error) {
 		return nil, err
 	}
 	// PersistentPreRunE may have used a default handler; YAML is authoritative.
-	if err := installLogLevel(cmd, cfg.LogLevelOrDefault()); err != nil {
-		return nil, err
+	if cmd != nil {
+		if err := installLogLevel(cmd, cfg.LogLevelOrDefault()); err != nil {
+			return nil, err
+		}
 	}
 	return app.New(cfg)
 }

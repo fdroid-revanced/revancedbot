@@ -18,7 +18,7 @@ func newDownloadCmd() *cobra.Command {
 		Short: "Download one stock APK into CACHE",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			a, err := loadApp(args, loadOpts{requireDoc: true})
+			a, err := loadApp(cmd, args, loadOpts{requireDoc: true})
 			if err != nil {
 				return err
 			}

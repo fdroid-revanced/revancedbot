@@ -57,7 +57,7 @@ func TestLoadApp_reloadsHandlerAfterYAML(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(repo, "revancedbot.yaml"), []byte("log_level: debug\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := loadApp(root, []string{repo}); err != nil {
+	if _, err := loadApp(root, []string{repo}, loadOpts{}); err != nil {
 		t.Fatal(err)
 	}
 	assertEnabled(t, logging.GetLogger(root.Context()), slog.LevelDebug)

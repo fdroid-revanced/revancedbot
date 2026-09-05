@@ -59,14 +59,14 @@ func TestRefuseMissingAuthorityDoc(t *testing.T) {
 
 func TestLoadApp_missingYAMLOptional(t *testing.T) {
 	repo := t.TempDir()
-	if _, err := loadApp([]string{repo}, loadOpts{}); err != nil {
+	if _, err := loadApp(nil, []string{repo}, loadOpts{}); err != nil {
 		t.Fatal(err)
 	}
 }
 
 func TestLoadAppRequired_missingYAML(t *testing.T) {
 	repo := t.TempDir()
-	_, err := loadApp([]string{repo}, loadOpts{requireDoc: true})
+	_, err := loadApp(nil, []string{repo}, loadOpts{requireDoc: true})
 	if err == nil {
 		t.Fatal("expected error for missing authority doc")
 	}
@@ -83,7 +83,7 @@ func TestLoadAppRequired_configOverride(t *testing.T) {
 	}
 	cfgFile = doc
 	t.Cleanup(func() { cfgFile = "" })
-	if _, err := loadApp([]string{repo}, loadOpts{requireDoc: true}); err != nil {
+	if _, err := loadApp(nil, []string{repo}, loadOpts{requireDoc: true}); err != nil {
 		t.Fatal(err)
 	}
 }
