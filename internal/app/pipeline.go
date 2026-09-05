@@ -87,16 +87,21 @@ func (a *App) PublishStage() error {
 	return fdroid.Publish(a.WS.Stage, a.WS.Repo)
 }
 
-// FetchTools downloads CLI + patches into CACHE (skips name hits).
+// FetchTools downloads CLI + patches into CACHE.
+// A patches file/URL override replaces a cached .rvp even on name-hits.
 func (a *App) FetchTools(ctx context.Context) error {
 	log := logging.GetLogger(ctx)
 	cli := a.WS.PatcherJAR()
 	rvp := a.WS.PatchesRVP()
-	if workspace.CacheHit(cli) && workspace.CacheHit(rvp) {
+	override := revanced.PatchesOverride()
+	if workspace.CacheHit(cli) && workspace.CacheHit(rvp) && !override {
 		log.Info("tools cache hit", "cli", cli, "patches", rvp)
 		return nil
 	}
 	log.Info("fetching ReVanced CLI and patches into cache", "cache", a.WS.Cache)
+	if override && workspace.CacheHit(cli) {
+		return revanced.FetchPatches(ctx, a.Cfg.GitHubToken, rvp)
+	}
 	return revanced.FetchLatest(ctx, a.Cfg.GitHubToken, cli, rvp)
 }
 
