@@ -12,6 +12,7 @@ import (
 
 	"github.com/lucasew/revancedbot/internal/apksign"
 	"github.com/lucasew/revancedbot/internal/signing"
+	"github.com/lucasew/revancedbot/internal/workspace"
 )
 
 // RepoMeta is branding for config.yml (from revancedbot.yaml).
@@ -27,16 +28,30 @@ const (
 	EnvKeyPass      = "REVANCEDBOT_KEY_PASS"
 )
 
-// WriteConfig writes stage config.yml (under CACHE). keystorePath must be absolute under CACHE.
-func WriteConfig(path string, meta RepoMeta, keystoreAbs string, blob *signing.Blob) error {
+// WriteConfig writes stage config.yml (under CACHE).
+// keystoreAbs must resolve under cache and must not resolve under repo.
+func WriteConfig(path string, meta RepoMeta, cache, repo, keystoreAbs string, blob *signing.Blob) error {
 	if meta.Name == "" {
 		meta.Name = "ReVanced F-Droid Repo"
 	}
 	if meta.URL == "" {
 		meta.URL = "https://example.invalid/fdroid/repo"
 	}
+	if cache == "" || repo == "" {
+		return fmt.Errorf("cache and repo are required: %w", ErrBase)
+	}
 	if !filepath.IsAbs(keystoreAbs) {
 		return fmt.Errorf("keystore path must be absolute: %s: %w", keystoreAbs, ErrBase)
+	}
+	ks, err := workspace.Resolve(keystoreAbs)
+	if err != nil {
+		return fmt.Errorf("keystore path %s: %w", keystoreAbs, err)
+	}
+	if !workspace.Under(cache, ks) {
+		return fmt.Errorf("keystore path must resolve under cache: %s: %w", keystoreAbs, ErrBase)
+	}
+	if workspace.Under(repo, ks) {
+		return fmt.Errorf("keystore path must not resolve under repo: %s: %w", keystoreAbs, ErrBase)
 	}
 
 	sdkLine := ""
