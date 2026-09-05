@@ -11,7 +11,7 @@ func newRunCmd() *cobra.Command {
 		Short: "Full pipeline: tools → download → patch → fdroid update (REPO in/out)",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			a, err := loadApp(cmd, args)
+			a, err := loadAppRequired(cmd, args)
 			if err != nil {
 				return err
 			}
@@ -28,7 +28,7 @@ func newSmokeCmd() *cobra.Command {
 		Short: "Try packages in random order until N succeed, then fdroid update",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			a, err := loadApp(cmd, args)
+			a, err := loadAppRequired(cmd, args)
 			if err != nil {
 				return err
 			}
