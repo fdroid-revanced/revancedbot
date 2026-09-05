@@ -2,6 +2,7 @@ package app
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"math/rand"
 	"os"
@@ -121,24 +122,40 @@ func (a *App) ProcessPackage(ctx context.Context, job revanced.Job) error {
 		order = download.DefaultOrder
 	}
 
-	versions := job.Versions
+	err := tryVersions(job.Versions, func(ver string) error {
+		err := a.processVersion(ctx, job, ver, reg, order)
+		if err != nil {
+			log.Warn("version failed", "package", job.PackageID, "version", emptyAsLatest(ver), "err", err)
+		}
+		return err
+	})
+	if err != nil {
+		return fmt.Errorf("skip %s: %w", job.PackageID, err)
+	}
+	return nil
+}
+
+// tryVersions walks preferred versions. A nil result wins. errStopWalk ends
+// the Job without another StageAPK. Other errors continue.
+func tryVersions(versions []string, fn func(ver string) error) error {
 	if len(versions) == 0 {
 		versions = []string{""}
 	}
-
 	var lastErr error
 	for _, ver := range versions {
-		if err := a.processVersion(ctx, job, ver, reg, order); err != nil {
-			lastErr = err
-			log.Warn("version failed", "package", job.PackageID, "version", emptyAsLatest(ver), "err", err)
-			continue
+		err := fn(ver)
+		if err == nil {
+			return nil
 		}
-		return nil
+		lastErr = err
+		if errors.Is(err, errStopWalk) {
+			break
+		}
 	}
 	if lastErr == nil {
 		lastErr = fmt.Errorf("no versions to try: %w", ErrBase)
 	}
-	return fmt.Errorf("skip %s: %w", job.PackageID, lastErr)
+	return lastErr
 }
 
 func (a *App) processVersion(ctx context.Context, job revanced.Job, ver string, reg download.Registry, order []string) error {
@@ -248,14 +265,16 @@ func (a *App) processVersion(ctx context.Context, job revanced.Job, ver string, 
 		return err
 	}
 
+	// INV-04: patched id must be stock + ".revanced" or this version is a miss.
+	if err := requirePatchedIdentity(outPath, job.PackageID); err != nil {
+		return err
+	}
+
 	pubID := job.PackageID + ".revanced"
 	if err := taskgroup.GoIsolated(ctx, "stage "+job.PackageID, taskgroup.IO, func(ctx context.Context, s *taskgroup.Status) error {
 		defer s.Unit()()
 		s.Update("copy into F-Droid stage")
-		if err := fdroid.StageAPK(a.WS.Stage, outPath); err != nil {
-			return err
-		}
-		return fdroid.WritePatchesMetadata(a.WS.Stage, pubID, patches)
+		return a.stagePatched(outPath, pubID, patches)
 	}); err != nil {
 		return err
 	}
@@ -272,6 +291,35 @@ func requireStockIdentity(path, packageID, version string) (apkmeta.Info, error)
 		return apkmeta.Info{}, err
 	}
 	return info, nil
+}
+
+func requirePatchedIdentity(path, stockID string) error {
+	info, err := apkmeta.Inspect(path)
+	if err != nil {
+		return fmt.Errorf("patched apk identity: %w", err)
+	}
+	return requirePatchedPackageID(info.PackageID, stockID)
+}
+
+func requirePatchedPackageID(got, stockID string) error {
+	want := stockID + ".revanced"
+	if got != want {
+		return fmt.Errorf("patched package %q != %q: %w", got, want, ErrBase)
+	}
+	return nil
+}
+
+// stagePatched copies the APK then writes metadata. Metadata failure removes
+// the staged APK and returns errStopWalk so the Job does not stage a second APK.
+func (a *App) stagePatched(apkPath, pubID string, patches []string) error {
+	if err := fdroid.StageAPK(a.WS.Stage, apkPath); err != nil {
+		return err
+	}
+	if err := fdroid.WritePatchesMetadata(a.WS.Stage, pubID, patches); err != nil {
+		osx.Remove(filepath.Join(a.WS.Stage, "repo", filepath.Base(apkPath)))
+		return fmt.Errorf("patches metadata: %w: %w", err, errStopWalk)
+	}
+	return nil
 }
 
 func moveFile(src, dst string) error {
