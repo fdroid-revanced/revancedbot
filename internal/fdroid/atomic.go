@@ -5,6 +5,10 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"strings"
+	"uuid"
+
+	ioatomic "github.com/lewtec/lewkit/x/io/atomic"
 
 	"github.com/lucasew/revancedbot/internal/osx"
 )
@@ -12,20 +16,18 @@ import (
 // livePublishNames is the Repo triple swapped as one unit (INV-01).
 var livePublishNames = []string{"config.yml", "repo", "metadata"}
 
-// WriteFileAtomic writes data to path via a same-dir temp file + rename.
+// WriteFileAtomic writes data to path via lewkit staging + rename.
 func WriteFileAtomic(path string, data []byte, perm os.FileMode) error {
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		return err
 	}
-	tmp := path + ".tmp"
-	if err := os.WriteFile(tmp, data, perm); err != nil {
+	if err := ioatomic.WriteFileFunction(path, func(w io.Writer) error {
+		_, err := w.Write(data)
+		return err
+	}); err != nil {
 		return err
 	}
-	if err := os.Rename(tmp, path); err != nil {
-		osx.Remove(tmp)
-		return err
-	}
-	return nil
+	return os.Chmod(path, perm)
 }
 
 // PublishArgs is the stage→live swap. LayoutOnly skips the index-artifact gate (fdroid-init).
@@ -54,18 +56,21 @@ func Publish(args PublishArgs) error {
 		return err
 	}
 
-	for _, name := range livePublishNames {
-		if err := stagePublishEntry(filepath.Join(args.Stage, name), publishTmp(args.Live, name)); err != nil {
-			removePublishTemps(args.Live)
+	ops := make([]ioatomic.Operation, len(livePublishNames))
+	for i, name := range livePublishNames {
+		dst := filepath.Join(args.Live, name)
+		ops[i] = ioatomic.NewOperation(dst, true)
+		if err := stagePublishEntry(filepath.Join(args.Stage, name), ops[i].StagingPath()); err != nil {
+			rollbackOps(ops[:i+1])
 			return fmt.Errorf("publish %s: %w", name, err)
 		}
 	}
 
 	var swapped []string
-	for _, name := range livePublishNames {
-		if err := swapPublishEntry(args.Live, name); err != nil {
+	for i, name := range livePublishNames {
+		if err := swapPublishEntry(args.Live, name, &ops[i]); err != nil {
 			rollbackPublish(args.Live, swapped)
-			removePublishTemps(args.Live)
+			rollbackOps(ops)
 			return fmt.Errorf("publish %s: %w", name, err)
 		}
 		swapped = append(swapped, name)
@@ -74,10 +79,6 @@ func Publish(args PublishArgs) error {
 		osx.RemoveAll(publishOld(args.Live, name))
 	}
 	return nil
-}
-
-func publishTmp(root, name string) string {
-	return filepath.Join(root, "."+name+".new")
 }
 
 func publishOld(root, name string) string {
@@ -96,22 +97,50 @@ func stagePublishEntry(src, tmp string) error {
 	return copyFile(src, tmp, 0o600)
 }
 
-func swapPublishEntry(root, name string) error {
+func swapPublishEntry(root, name string, op *ioatomic.Operation) error {
 	dst := filepath.Join(root, name)
-	tmp := publishTmp(root, name)
 	old := publishOld(root, name)
 	osx.RemoveAll(old)
+	// NewOperation currently ignores replace; move live aside so Commit can rename.
 	if _, err := os.Stat(dst); err == nil {
 		if err := os.Rename(dst, old); err != nil {
 			return err
 		}
 	}
-	if err := os.Rename(tmp, dst); err != nil {
+	if err := op.Commit(); err != nil {
 		osx.Rename(old, dst)
-		osx.RemoveAll(tmp)
+		rollbackOp(op)
 		return err
 	}
 	return nil
+}
+
+func rollbackOp(op *ioatomic.Operation) {
+	if err := op.Rollback(); err != nil {
+		return
+	}
+}
+
+func rollbackOps(ops []ioatomic.Operation) {
+	for i := range ops {
+		rollbackOp(&ops[i])
+	}
+}
+
+func isPublishTempName(name string) bool {
+	if strings.HasPrefix(name, ".") && (strings.HasSuffix(name, ".new") || strings.HasSuffix(name, ".old")) {
+		return true
+	}
+	for _, pub := range livePublishNames {
+		rest, ok := strings.CutPrefix(name, pub+".")
+		if !ok {
+			continue
+		}
+		if _, err := uuid.Parse(rest); err == nil {
+			return true
+		}
+	}
+	return false
 }
 
 func rollbackPublish(root string, names []string) {
@@ -124,12 +153,6 @@ func rollbackPublish(root string, names []string) {
 		dst := filepath.Join(root, name)
 		osx.RemoveAll(dst)
 		osx.Rename(old, dst)
-	}
-}
-
-func removePublishTemps(root string) {
-	for _, name := range livePublishNames {
-		osx.RemoveAll(publishTmp(root, name))
 	}
 }
 

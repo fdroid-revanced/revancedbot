@@ -1,10 +1,11 @@
 module github.com/lucasew/revancedbot
 
-go 1.25.6
+go 1.27.1
 
 require (
 	github.com/go-rod/rod v0.116.2
 	github.com/google/go-github/v69 v69.2.0
+	github.com/lewtec/lewkit v0.0.0-20260903000910-52886154b6dd
 	github.com/lucasew/workspaced v0.0.0-20260814184647-266ea15ae3d7
 	github.com/spf13/cobra v1.10.2
 	github.com/spf13/viper v1.21.0
@@ -45,8 +46,8 @@ require (
 	github.com/ysmood/got v0.40.0 // indirect
 	github.com/ysmood/gson v0.7.3 // indirect
 	github.com/ysmood/leakless v0.9.0 // indirect
-	go.yaml.in/yaml/v3 v3.0.4 // indirect
-	golang.org/x/sync v0.21.0 // indirect
+	go.yaml.in/yaml/v3 v3.0.5 // indirect
+	golang.org/x/sync v0.22.0 // indirect
 	golang.org/x/sys v0.46.0 // indirect
 	golang.org/x/text v0.38.0 // indirect
 )
