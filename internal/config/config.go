@@ -55,9 +55,29 @@ func EnsureRepoDir(repo string) (string, error) {
 	return repoAbs, nil
 }
 
+// LoadFromRepoRequired is LoadFromRepo but missing REPO/revancedbot.yaml is an
+// error when cfgFile is empty. A set cfgFile must still exist.
+func LoadFromRepoRequired(repo, cacheFlag, cfgFile string) (*Config, error) {
+	if cfgFile == "" {
+		repoAbs, err := filepath.Abs(repo)
+		if err != nil {
+			return nil, err
+		}
+		path := filepath.Join(repoAbs, "revancedbot.yaml")
+		if _, err := os.Stat(path); err != nil {
+			if errors.Is(err, fs.ErrNotExist) {
+				return nil, fmt.Errorf("%s: %w", path, ErrMissingAuthorityDoc)
+			}
+			return nil, fmt.Errorf("authority doc %s: %w", path, err)
+		}
+	}
+	return LoadFromRepo(repo, cacheFlag, cfgFile)
+}
+
 // LoadFromRepo loads REPO/revancedbot.yaml (or cfgFile override).
 // cacheFlag empty means caller will mkdtemp.
 // The REPO path must already exist as a directory (use EnsureRepoDir for init).
+// Missing REPO/revancedbot.yaml is allowed; callers that must refuse use LoadFromRepoRequired.
 func LoadFromRepo(repo, cacheFlag, cfgFile string) (*Config, error) {
 	repoAbs, err := filepath.Abs(repo)
 	if err != nil {
@@ -96,7 +116,6 @@ func LoadFromRepo(repo, cacheFlag, cfgFile string) (*Config, error) {
 				return nil, fmt.Errorf("read %s: %w", path, err)
 			}
 		}
-		// optional: missing yaml uses defaults only
 	}
 
 	type fileShape struct {

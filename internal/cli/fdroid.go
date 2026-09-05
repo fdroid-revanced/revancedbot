@@ -17,15 +17,15 @@ func newFDroidInitCmd() *cobra.Command {
 		Short: "Create REPO if needed, stage config in CACHE, atomically publish layout",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			if err := toolscheck.Check(toolscheck.KeysOnly()); err != nil {
-				return err
-			}
 			// Idempotent: mkdir -p REPO so a brand-new path works.
 			if _, err := config.EnsureRepoDir(args[0]); err != nil {
 				return err
 			}
-			a, err := loadApp(cmd, args)
+			a, err := loadAppRequired(cmd, args)
 			if err != nil {
+				return err
+			}
+			if err := toolscheck.Check(toolscheck.KeysOnly()); err != nil {
 				return err
 			}
 			ctx := ctxOf(cmd)
@@ -57,11 +57,11 @@ func newFDroidUpdateCmd() *cobra.Command {
 		Short: "fdroid update in CACHE stage then atomically publish to REPO",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			if err := toolscheck.Check(toolscheck.DefaultRun()); err != nil {
+			a, err := loadAppRequired(cmd, args)
+			if err != nil {
 				return err
 			}
-			a, err := loadApp(cmd, args)
-			if err != nil {
+			if err := toolscheck.Check(toolscheck.DefaultRun()); err != nil {
 				return err
 			}
 			ctx := ctxOf(cmd)
