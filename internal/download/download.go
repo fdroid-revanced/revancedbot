@@ -44,11 +44,12 @@ type Registry map[string]Downloader
 var DefaultOrder = []string{"aptoide", "apkpure", "apkmirror"}
 
 // DefaultRegistry returns built-in downloaders.
-func DefaultRegistry() Registry {
+// cdp is the operator CDP URL; empty means no browser upgrade.
+func DefaultRegistry(cdp string) Registry {
 	return Registry{
-		"aptoide":   &Aptoide{},
-		"apkpure":   &APKPure{},
-		"apkmirror": &APKMirror{},
+		"aptoide":   &Aptoide{CDPURL: cdp},
+		"apkpure":   &APKPure{CDPURL: cdp},
+		"apkmirror": &APKMirror{CDPURL: cdp},
 	}
 }
 

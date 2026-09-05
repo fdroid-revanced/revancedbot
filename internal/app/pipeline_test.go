@@ -8,6 +8,8 @@ import (
 	"path/filepath"
 	"testing"
 
+	"github.com/lucasew/revancedbot/internal/config"
+	"github.com/lucasew/revancedbot/internal/download"
 	"github.com/lucasew/revancedbot/internal/workspace"
 )
 
@@ -141,5 +143,30 @@ func TestStagePatched_metadataFailRemovesAPK(t *testing.T) {
 	}
 	if _, err := os.Stat(filepath.Join(stage, "repo", "com.example.app_1.0_revanced.apk")); !errors.Is(err, fs.ErrNotExist) {
 		t.Fatalf("staged apk should be removed: %v", err)
+	}
+}
+
+func TestStockRegistry_passesBrowserCDPURL(t *testing.T) {
+	t.Parallel()
+	const cdp = "ws://127.0.0.1:3000"
+	a := &App{Cfg: &config.Config{BrowserCDPURL: cdp}}
+	reg := a.stockRegistry()
+	if got := reg["aptoide"].(*download.Aptoide).CDPURL; got != cdp {
+		t.Fatalf("aptoide CDPURL=%q want %q", got, cdp)
+	}
+	if got := reg["apkpure"].(*download.APKPure).CDPURL; got != cdp {
+		t.Fatalf("apkpure CDPURL=%q want %q", got, cdp)
+	}
+	if got := reg["apkmirror"].(*download.APKMirror).CDPURL; got != cdp {
+		t.Fatalf("apkmirror CDPURL=%q want %q", got, cdp)
+	}
+}
+
+func TestStockRegistry_emptyCDP(t *testing.T) {
+	t.Parallel()
+	a := &App{Cfg: &config.Config{}}
+	reg := a.stockRegistry()
+	if got := reg["aptoide"].(*download.Aptoide).CDPURL; got != "" {
+		t.Fatalf("empty config CDPURL=%q", got)
 	}
 }

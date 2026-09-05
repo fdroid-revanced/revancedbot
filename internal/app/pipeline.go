@@ -116,7 +116,7 @@ func (a *App) ListJobs() ([]revanced.Job, error) {
 // "apks" Map in RunFull (plus httpclient fetch bars for network).
 func (a *App) ProcessPackage(ctx context.Context, job revanced.Job) error {
 	log := logging.GetLogger(ctx)
-	reg := download.DefaultRegistry()
+	reg := a.stockRegistry()
 	order := a.Cfg.DownloaderOrder
 	if len(order) == 0 {
 		order = download.DefaultOrder
@@ -538,4 +538,8 @@ func emptyAsLatest(v string) string {
 		return "latest"
 	}
 	return v
+}
+
+func (a *App) stockRegistry() download.Registry {
+	return download.DefaultRegistry(a.Cfg.BrowserCDPURL)
 }

@@ -41,6 +41,7 @@ func looksLikeBundleResponse(resp *http.Response) bool {
 // then downloads the APK URL. Falls back to d.apkpure.com URL shapes.
 type APKPure struct {
 	Client *http.Client
+	CDPURL string
 }
 
 func (a *APKPure) ID() string { return "apkpure" }
@@ -103,11 +104,12 @@ func (a *APKPure) listAPKURL(ctx context.Context, cl *http.Client, pkg, version 
 		return "", err
 	}
 	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		return "", fmt.Errorf("listing HTTP %s: %w", resp.Status, ErrBase)
-	}
 	const maxListing = 8 << 20
 	body, err := io.ReadAll(io.LimitReader(resp.Body, maxListing))
+	if err != nil {
+		return "", err
+	}
+	body, err = (rawHTTP{URL: apkpureListURL + pkg, Status: resp.StatusCode, Body: body}).finish(ctx, a.CDPURL)
 	if err != nil {
 		return "", err
 	}

@@ -16,10 +16,11 @@ import (
 
 var apkmirrorBase = "https://www.apkmirror.com"
 
-// APKMirror scrapes apkmirror.com (HTTP + HTML, no browser/CDP).
+// APKMirror scrapes apkmirror.com (HTTP first; rod if the page needs a browser).
 // Flow: search by package → release page → best variant → download/?key= → download.php.
 type APKMirror struct {
 	Client *http.Client
+	CDPURL string
 }
 
 func (a *APKMirror) ID() string { return "apkmirror" }
@@ -106,16 +107,17 @@ func (a *APKMirror) getHTML(ctx context.Context, cl *http.Client, pageURL, refer
 		return "", err
 	}
 	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		return "", fmt.Errorf("HTTP %s for %s: %w", resp.Status, pageURL, ErrBase)
-	}
 	// Cap HTML so a runaway page cannot fill memory.
 	const maxHTML = 8 << 20
 	body, err := io.ReadAll(io.LimitReader(resp.Body, maxHTML))
 	if err != nil {
 		return "", err
 	}
-	return string(body), nil
+	got, err := (rawHTTP{URL: pageURL, Status: resp.StatusCode, Body: body, HTMLOK: true}).finish(ctx, a.CDPURL)
+	if err != nil {
+		return "", err
+	}
+	return string(got), nil
 }
 
 // releaseHrefRe matches /apk/{dev}/{app}/{slug}-release/ links.
