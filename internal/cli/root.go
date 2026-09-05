@@ -32,6 +32,9 @@ func NewRoot() *cobra.Command {
 		SilenceErrors: true,
 		Version:       version.Version,
 		PersistentPreRunE: func(cmd *cobra.Command, args []string) error {
+			if err := requireConfigIfSet(); err != nil {
+				return err
+			}
 			cfg := optionalConfig(args)
 			if err := installLogLevel(cmd, cfg.LogLevelOrDefault()); err != nil {
 				return err
@@ -52,6 +55,7 @@ func NewRoot() *cobra.Command {
 	root.PersistentFlags().StringVar(&cacheFlag, "cache", "", "cache directory (default: mkdtemp; tools/stock/signing)")
 
 	root.AddCommand(
+		newVersionCmd(),
 		newKeysCmd(),
 		newFetchToolsCmd(),
 		newListJobsCmd(),
@@ -63,6 +67,28 @@ func NewRoot() *cobra.Command {
 		newSmokeCmd(),
 	)
 	return root
+}
+
+func newVersionCmd() *cobra.Command {
+	return &cobra.Command{
+		Use:   "version",
+		Short: "Print the version",
+		Run: func(cmd *cobra.Command, args []string) {
+			fmt.Fprintln(cmd.OutOrStdout(), version.Version)
+		},
+	}
+}
+
+// requireConfigIfSet enforces the public --config contract: when the flag is
+// set the file must exist, including on commands that take no REPO.
+func requireConfigIfSet() error {
+	if cfgFile == "" {
+		return nil
+	}
+	if _, err := os.Stat(cfgFile); err != nil {
+		return fmt.Errorf("config %s: %w", cfgFile, err)
+	}
+	return nil
 }
 
 func optionalConfig(args []string) *config.Config {
@@ -158,7 +184,7 @@ func loadApp(args []string, opts loadOpts) (*app.App, error) {
 		return nil, err
 	}
 	// PersistentPreRunE may have used a default handler; YAML is authoritative.
-	if err := installLogLevel(cmd, cfg.LogLevelOrDefault()); err != nil {
+	if err := installLogLevel(&cobra.Command{Use: "load"}, cfg.LogLevelOrDefault()); err != nil {
 		return nil, err
 	}
 	return app.New(cfg)
