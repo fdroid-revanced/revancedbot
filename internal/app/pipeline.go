@@ -471,6 +471,7 @@ func (a *App) RunFull(ctx context.Context) error {
 }
 
 // RunSmoke tries packages until maxOK succeed (or list exhausted). For TMP e2e.
+// Job set is the same as run (TEC-04): every ListJobs entry, no package filter.
 func (a *App) RunSmoke(ctx context.Context, maxOK int) (ok int, err error) {
 	if err := checkTools(); err != nil {
 		return 0, err
@@ -488,43 +489,56 @@ func (a *App) RunSmoke(ctx context.Context, maxOK int) (ok int, err error) {
 	if err != nil {
 		return 0, err
 	}
+	return runSmoke(ctx, smokeRun{
+		jobs:  jobs,
+		maxOK: maxOK,
+		try: func(ctx context.Context, job revanced.Job) error {
+			return processPackage(a, ctx, job)
+		},
+		update:  func(ctx context.Context) error { return fdroidUpdate(a, ctx, true) },
+		publish: func() error { return publishStage(a) },
+	})
+}
+
+type smokeRun struct {
+	jobs    []revanced.Job
+	maxOK   int
+	try     func(context.Context, revanced.Job) error
+	update  func(context.Context) error
+	publish func() error
+}
+
+func runSmoke(ctx context.Context, s smokeRun) (int, error) {
 	log := logging.GetLogger(ctx)
+	maxOK := s.maxOK
 	if maxOK <= 0 {
 		maxOK = 1
 	}
-
-	// Filter candidates, shuffle so each smoke run picks a different starting app,
-	// then Serial Each until maxOK succeed (stop scheduling via atomic).
-	var candidates []revanced.Job
-	for _, job := range jobs {
-		low := strings.ToLower(job.PackageID)
-		if strings.Contains(low, "youtube") || strings.Contains(low, "photos") {
-			continue
-		}
-		candidates = append(candidates, job)
-	}
-	rand.Shuffle(len(candidates), func(i, j int) {
-		candidates[i], candidates[j] = candidates[j], candidates[i]
+	jobs := s.jobs
+	// Shuffle so each smoke run picks a different starting app, then Serial
+	// Each until maxOK succeed (stop scheduling via atomic).
+	rand.Shuffle(len(jobs), func(i, j int) {
+		jobs[i], jobs[j] = jobs[j], jobs[i]
 	})
-	if len(candidates) > 0 {
-		log.Info("smoke order", "first", candidates[0].PackageID, "candidates", len(candidates), "max_ok", maxOK)
+	if len(jobs) > 0 {
+		log.Info("smoke order", "first", jobs[0].PackageID, "candidates", len(jobs), "max_ok", maxOK)
 	}
 
 	var okCount atomic.Int64
-	err = taskgroup.Each[revanced.Job]{
+	err := taskgroup.Each[revanced.Job]{
 		Name:     "smoke packages",
-		Items:    candidates,
+		Items:    jobs,
 		PoolKind: taskgroup.Control,
 		Serial:   true,
 		TaskName: func(_ int, j revanced.Job) string { return j.PackageID },
-		Fn: func(ctx context.Context, s *taskgroup.Status, job revanced.Job) error {
+		Fn: func(ctx context.Context, st *taskgroup.Status, job revanced.Job) error {
 			if okCount.Load() >= int64(maxOK) {
 				return nil
 			}
-			s.Update(job.PackageID)
+			st.Update(job.PackageID)
 			log.Info("smoke try", "package", job.PackageID)
 			err := taskgroup.Isolate(ctx, func(ctx context.Context) error {
-				return processPackage(a, ctx, job)
+				return s.try(ctx, job)
 			})
 			if err != nil {
 				log.Warn("smoke skip", "package", job.PackageID, "err", err)
@@ -537,14 +551,14 @@ func (a *App) RunSmoke(ctx context.Context, maxOK int) (ok int, err error) {
 	if err != nil {
 		return 0, err
 	}
-	ok = int(okCount.Load())
+	ok := int(okCount.Load())
 	if ok == 0 {
 		return 0, fmt.Errorf("no package succeeded download+patch (tried %d jobs): %w", len(jobs), ErrBase)
 	}
-	if err := fdroidUpdate(a, ctx, true); err != nil {
+	if err := s.update(ctx); err != nil {
 		return ok, err
 	}
-	if err := publishStage(a); err != nil {
+	if err := s.publish(); err != nil {
 		return ok, err
 	}
 	return ok, nil
