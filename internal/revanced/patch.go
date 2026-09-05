@@ -23,8 +23,7 @@ type PatchOptions struct {
 	EnableChangePackageName bool
 }
 
-// Patch runs revanced-cli patch (unsigned-by-us), then re-signs with operator key via apksigner.
-// ReVanced's BouncyCastle cannot load modern keytool keystores reliably, so we do not pass --keystore to CLI.
+// Patch applies ReVanced CLI patches, then signs with host apksigner (TEC-05).
 func Patch(opts PatchOptions) (appliedPatches []string, err error) {
 	java := opts.JavaBin
 	if java == "" {
