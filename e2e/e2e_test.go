@@ -14,6 +14,7 @@ import (
 	"github.com/lucasew/revancedbot/internal/app"
 	"github.com/lucasew/revancedbot/internal/config"
 	_ "github.com/lucasew/revancedbot/internal/drivers"
+	"github.com/lucasew/revancedbot/internal/fdroid"
 	"github.com/lucasew/revancedbot/internal/signing"
 	"github.com/lucasew/revancedbot/internal/toolscheck"
 	"github.com/lucasew/workspaced/pkg/logging"
@@ -68,7 +69,7 @@ func TestE2E_RepoCacheLayout(t *testing.T) {
 	if _, err := os.Stat(a.WS.LiveConfig()); err == nil {
 		t.Fatal("config.yml must not be written directly to live REPO before publish")
 	}
-	if err := a.PublishStage(); err != nil {
+	if err := fdroid.Publish(fdroid.PublishArgs{Stage: a.WS.Stage, Live: a.WS.Repo, LayoutOnly: true}); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := os.Stat(a.WS.LiveConfig()); err != nil {

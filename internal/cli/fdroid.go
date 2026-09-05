@@ -36,7 +36,7 @@ func newFDroidInitCmd() *cobra.Command {
 			if err := a.PrepareStage(); err != nil {
 				return err
 			}
-			if err := fdroid.Publish(a.WS.Stage, a.WS.Repo, true); err != nil {
+			if err := fdroid.Publish(fdroid.PublishArgs{Stage: a.WS.Stage, Live: a.WS.Repo, LayoutOnly: true}); err != nil {
 				return err
 			}
 			log.Info("fdroid init ok",

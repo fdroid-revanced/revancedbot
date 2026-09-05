@@ -47,7 +47,7 @@ func TestPublish(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(live, "repo", "old.apk"), []byte("old"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	if err := Publish(stage, live, false); err != nil {
+	if err := Publish(PublishArgs{Stage: stage, Live: live}); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := os.Stat(filepath.Join(live, "config.yml")); err != nil {
@@ -64,7 +64,7 @@ func TestPublish(t *testing.T) {
 	if err := os.WriteFile(auth, []byte("ok\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	if err := Publish(stage, live, false); err != nil {
+	if err := Publish(PublishArgs{Stage: stage, Live: live}); err != nil {
 		t.Fatal(err)
 	}
 	b, err := os.ReadFile(auth)
@@ -85,10 +85,10 @@ func TestPublishLayoutOnly(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(stage, "config.yml"), []byte("repo_name: t\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	if err := Publish(stage, live, false); err == nil {
+	if err := Publish(PublishArgs{Stage: stage, Live: live}); err == nil {
 		t.Fatal("expected index gate without layoutOnly")
 	}
-	if err := Publish(stage, live, true); err != nil {
+	if err := Publish(PublishArgs{Stage: stage, Live: live, LayoutOnly: true}); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := os.Stat(filepath.Join(live, "config.yml")); err != nil {
