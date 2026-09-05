@@ -1,12 +1,14 @@
 package download
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
 	"path/filepath"
+	"sort"
 	"strconv"
 	"strings"
 
@@ -49,12 +51,28 @@ func (a *Aptoide) Fetch(ctx context.Context, req Request, destDir string) (*Resu
 	if pkg == "" {
 		return nil, fmt.Errorf("package id required: %w", ErrBase)
 	}
+	req.PackageID = pkg
 	cl := orClient(a.Client, httpClient(ctx))
 
-	cand, err := a.findVersion(ctx, cl, pkg, req.Version)
+	cands, err := a.findVersions(ctx, cl, pkg, req.Version)
 	if err != nil {
 		return nil, err
 	}
+	var lastErr error
+	for _, cand := range cands {
+		res, err := a.fetchCandidate(ctx, cl, req, destDir, cand)
+		if err == nil {
+			return res, nil
+		}
+		lastErr = err
+	}
+	if lastErr == nil {
+		lastErr = fmt.Errorf("no aptoide APK candidate: %w", ErrBase)
+	}
+	return nil, lastErr
+}
+
+func (a *Aptoide) fetchCandidate(ctx context.Context, cl *http.Client, req Request, destDir string, cand aptoideVersion) (*Result, error) {
 	dlURL, verName, err := a.metaDownload(ctx, cl, cand.ID)
 	if err != nil {
 		return nil, err
@@ -76,7 +94,7 @@ func (a *Aptoide) Fetch(ctx context.Context, req Request, destDir string) (*Resu
 
 	if logging.ContextHasLogger(ctx) {
 		logging.GetLogger(ctx).Info("aptoide pick",
-			"package", pkg,
+			"package", req.PackageID,
 			"version", cand.VerName,
 			"vercode", cand.VerCode,
 			"malware", cand.Malware,
@@ -85,7 +103,7 @@ func (a *Aptoide) Fetch(ctx context.Context, req Request, destDir string) (*Resu
 		)
 	}
 
-	path := filepath.Join(destDir, stockFileName(pkg, label))
+	path := filepath.Join(destDir, stockFileName(req.PackageID, label))
 	n, sha, err := saveAPK(ctx, cl, dlURL, path)
 	if err != nil {
 		return nil, err
@@ -128,8 +146,9 @@ type aptoideVersionsResp struct {
 }
 
 type aptoideVersionItem struct {
-	ID   int64 `json:"id"`
-	Size int64 `json:"size"`
+	ID   int64           `json:"id"`
+	Size int64           `json:"size"`
+	OBB  json.RawMessage `json:"obb"`
 	File struct {
 		VerName  string `json:"vername"`
 		VerCode  int64  `json:"vercode"`
@@ -139,19 +158,22 @@ type aptoideVersionItem struct {
 			Rank string `json:"rank"`
 		} `json:"malware"`
 		Hardware struct {
-			CPUs []string `json:"cpus"`
+			CPUs      []string        `json:"cpus"`
+			Densities json.RawMessage `json:"densities"`
 		} `json:"hardware"`
 	} `json:"file"`
 }
 
 type aptoideVersion struct {
-	ID      int64
-	VerName string
-	VerCode int64
-	MD5     string
-	Size    int64
-	CPUs    []string
-	Malware string
+	ID        int64
+	VerName   string
+	VerCode   int64
+	MD5       string
+	Size      int64
+	CPUs      []string
+	Densities []byte
+	HasOBB    bool
+	Malware   string
 }
 
 func (it aptoideVersionItem) asVersion() aptoideVersion {
@@ -160,40 +182,59 @@ func (it aptoideVersionItem) asVersion() aptoideVersion {
 		size = it.Size
 	}
 	return aptoideVersion{
-		ID:      it.ID,
-		VerName: it.File.VerName,
-		VerCode: it.File.VerCode,
-		MD5:     it.File.MD5,
-		Size:    size,
-		CPUs:    it.File.Hardware.CPUs,
-		Malware: it.File.Malware.Rank,
+		ID:        it.ID,
+		VerName:   it.File.VerName,
+		VerCode:   it.File.VerCode,
+		MD5:       it.File.MD5,
+		Size:      size,
+		CPUs:      it.File.Hardware.CPUs,
+		Densities: append([]byte(nil), it.File.Hardware.Densities...),
+		HasOBB:    aptoideHasOBB(it.OBB),
+		Malware:   it.File.Malware.Rank,
 	}
 }
 
-func (a *Aptoide) findVersion(ctx context.Context, cl *http.Client, pkg, version string) (aptoideVersion, error) {
+func aptoideHasOBB(raw json.RawMessage) bool {
+	s := strings.TrimSpace(string(raw))
+	return s != "" && s != "null" && s != "{}"
+}
+
+func (a *Aptoide) findVersions(ctx context.Context, cl *http.Client, pkg, version string) ([]aptoideVersion, error) {
 	var lastErr error
+	var found []aptoideVersion
+	latest := version == "" || strings.EqualFold(version, "latest")
 	for page := range aptoideMaxPages {
 		offset := page * aptoidePageSize
 		list, err := a.listVersions(ctx, cl, pkg, aptoidePageSize, offset)
 		if err != nil {
-			return aptoideVersion{}, err
+			return nil, err
 		}
 		if len(list) == 0 {
 			break
 		}
-		if picked, ok := pickAptoideVersion(list, version); ok {
-			return picked, nil
+		ranked := rankAptoideVersions(list, version)
+		if len(ranked) > 0 {
+			found = append(found, ranked...)
+			if latest {
+				return rankAptoideVersions(found, version), nil
+			}
+			continue
 		}
-		lastErr = fmt.Errorf("getVersions: version %q not on page offset=%d: %w", version, offset, ErrBase)
-		if version == "" || strings.EqualFold(version, "latest") {
-			// Newest page had no TRUSTED single-APK row.
+		if len(found) > 0 {
 			break
 		}
+		lastErr = fmt.Errorf("getVersions: version %q not on page offset=%d: %w", version, offset, ErrBase)
+		if latest {
+			break
+		}
+	}
+	if ranked := rankAptoideVersions(found, version); len(ranked) > 0 {
+		return ranked, nil
 	}
 	if lastErr == nil {
 		lastErr = fmt.Errorf("getVersions: no versions for %s: %w", pkg, ErrBase)
 	}
-	return aptoideVersion{}, lastErr
+	return nil, lastErr
 }
 
 func (a *Aptoide) listVersions(ctx context.Context, cl *http.Client, pkg string, limit, offset int) ([]aptoideVersion, error) {
@@ -217,6 +258,14 @@ func (a *Aptoide) listVersions(ctx context.Context, cl *http.Client, pkg string,
 }
 
 func pickAptoideVersion(list []aptoideVersion, want string) (aptoideVersion, bool) {
+	ranked := rankAptoideVersions(list, want)
+	if len(ranked) == 0 {
+		return aptoideVersion{}, false
+	}
+	return ranked[0], true
+}
+
+func rankAptoideVersions(list []aptoideVersion, want string) []aptoideVersion {
 	want = strings.TrimSpace(want)
 	if strings.EqualFold(want, "latest") {
 		want = ""
@@ -232,18 +281,62 @@ func pickAptoideVersion(list []aptoideVersion, want string) (aptoideVersion, boo
 		ok = append(ok, it)
 	}
 	if len(ok) == 0 {
-		return aptoideVersion{}, false
+		return nil
 	}
+	if want != "" {
+		sort.SliceStable(ok, func(i, j int) bool {
+			return scoreAptoide(ok[i]) > scoreAptoide(ok[j])
+		})
+		return ok
+	}
+	var keys []string
+	buckets := make(map[string][]aptoideVersion)
 	for _, it := range ok {
-		if aptoideUniversal(it) {
-			return it, true
+		k := aptoideVersionKey(it)
+		if _, seen := buckets[k]; !seen {
+			keys = append(keys, k)
 		}
+		buckets[k] = append(buckets[k], it)
 	}
-	return ok[0], true
+	var out []aptoideVersion
+	for _, k := range keys {
+		group := buckets[k]
+		sort.SliceStable(group, func(i, j int) bool {
+			return scoreAptoide(group[i]) > scoreAptoide(group[j])
+		})
+		out = append(out, group...)
+	}
+	return out
+}
+
+func aptoideVersionKey(it aptoideVersion) string {
+	if it.VerName != "" {
+		return it.VerName
+	}
+	return strconv.FormatInt(it.VerCode, 10)
+}
+
+func scoreAptoide(it aptoideVersion) int {
+	s := 0
+	switch {
+	case aptoideUniversal(it):
+		s += 30
+	case len(it.CPUs) >= 2:
+		s += 20
+	}
+	if aptoideBroadDPI(it) {
+		s += 10
+	}
+	return s
+}
+
+func aptoideBroadDPI(it aptoideVersion) bool {
+	d := bytes.TrimSpace(it.Densities)
+	return len(d) == 0 || string(d) == "null" || string(d) == "[]"
 }
 
 func aptoideAccept(it aptoideVersion) bool {
-	if it.ID == 0 {
+	if it.ID == 0 || it.HasOBB {
 		return false
 	}
 	rank := strings.ToUpper(strings.TrimSpace(it.Malware))

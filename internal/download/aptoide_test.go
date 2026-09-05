@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"strings"
 	"testing"
 )
 
@@ -56,6 +57,22 @@ func TestPickAptoideVersion(t *testing.T) {
 		ID: 4, VerName: "3.2.0", VerCode: 210000, Malware: "TRUSTED",
 		CPUs: []string{"armeabi-v7a", "arm64-v8a"},
 	}
+	narrowDPI := aptoideVersion{
+		ID: 5, VerName: "3.3.6", VerCode: 220491, Malware: "TRUSTED",
+		CPUs: []string{"armeabi-v7a", "arm64-v8a"}, Densities: []byte(`[[480,480]]`),
+	}
+	obb := aptoideVersion{
+		ID: 6, VerName: "3.3.6", VerCode: 220492, Malware: "TRUSTED",
+		CPUs: []string{"armeabi-v7a", "arm64-v8a"}, HasOBB: true,
+	}
+	newerArm64 := aptoideVersion{
+		ID: 7, VerName: "3.3.7", VerCode: 220501, Malware: "TRUSTED",
+		CPUs: []string{"arm64-v8a"},
+	}
+	multiX86 := aptoideVersion{
+		ID: 8, VerName: "3.3.6", VerCode: 220493, Malware: "TRUSTED",
+		CPUs: []string{"x86", "x86_64"},
+	}
 
 	t.Parallel()
 	tests := []struct {
@@ -70,6 +87,10 @@ func TestPickAptoideVersion(t *testing.T) {
 		{name: "prefix", list: []aptoideVersion{older, trustedUni}, want: "3.3", id: 1, ok: true},
 		{name: "skip untrusted latest", list: []aptoideVersion{untrusted, trustedUni}, want: "", id: 1, ok: true},
 		{name: "prefer universal", list: []aptoideVersion{trustedArm64, trustedUni}, want: "3.3.6", id: 1, ok: true},
+		{name: "prefer multi-abi", list: []aptoideVersion{trustedArm64, multiX86}, want: "3.3.6", id: 8, ok: true},
+		{name: "prefer broad dpi", list: []aptoideVersion{narrowDPI, trustedUni}, want: "3.3.6", id: 1, ok: true},
+		{name: "skip obb", list: []aptoideVersion{obb, trustedUni}, want: "3.3.6", id: 1, ok: true},
+		{name: "latest stays on newest", list: []aptoideVersion{newerArm64, trustedUni}, want: "", id: 7, ok: true},
 		{name: "reject untrusted exact", list: []aptoideVersion{untrusted}, want: "3.3.7", ok: false},
 		{name: "empty", list: nil, want: "1.0", ok: false},
 	}
@@ -84,6 +105,22 @@ func TestPickAptoideVersion(t *testing.T) {
 				t.Fatalf("id=%d want %d", got.ID, tt.id)
 			}
 		})
+	}
+}
+
+func TestRankAptoideVersions_order(t *testing.T) {
+	t.Parallel()
+	uni := aptoideVersion{
+		ID: 1, VerName: "3.3.6", VerCode: 1, Malware: "TRUSTED",
+		CPUs: []string{"armeabi-v7a", "arm64-v8a"},
+	}
+	arm := aptoideVersion{
+		ID: 2, VerName: "3.3.6", VerCode: 2, Malware: "TRUSTED",
+		CPUs: []string{"arm64-v8a"},
+	}
+	ranked := rankAptoideVersions([]aptoideVersion{arm, uni}, "3.3.6")
+	if len(ranked) != 2 || ranked[0].ID != 1 || ranked[1].ID != 2 {
+		t.Fatalf("order %+v", ranked)
 	}
 }
 
@@ -189,6 +226,64 @@ func TestAptoide_Fetch_rejectsMD5Mismatch(t *testing.T) {
 	_, err := (&Aptoide{Client: srv.Client()}).Fetch(t.Context(), Request{PackageID: "com.example.app", Version: "1.0.0"}, t.TempDir())
 	if err == nil || !errors.Is(err, ErrBase) {
 		t.Fatalf("want digest error, got %v", err)
+	}
+}
+
+func TestAptoide_Fetch_skipsBundleTriesNext(t *testing.T) {
+	apkBody := mustStoredZipBytes(t, map[string][]byte{
+		"AndroidManifest.xml": make([]byte, int(MinAPKBytes)+128),
+		"classes.dex":         []byte("dex"),
+	})
+	sum := md5.Sum(apkBody)
+	md5hex := hex.EncodeToString(sum[:])
+
+	mux := http.NewServeMux()
+	mux.HandleFunc("/versions/", func(w http.ResponseWriter, r *http.Request) {
+		fmt.Fprintf(w, `{
+			"info":{"status":"OK"},
+			"list":[
+				{"id":1,"file":{"vername":"1.0.0","vercode":1,"md5sum":%q,"filesize":%d,"malware":{"rank":"TRUSTED"},"hardware":{"cpus":["armeabi-v7a","arm64-v8a"]}}},
+				{"id":2,"file":{"vername":"1.0.0","vercode":2,"md5sum":%q,"filesize":%d,"malware":{"rank":"TRUSTED"},"hardware":{"cpus":["arm64-v8a"]}}}
+			]
+		}`, md5hex, len(apkBody), md5hex, len(apkBody))
+	})
+	mux.HandleFunc("/meta/", func(w http.ResponseWriter, r *http.Request) {
+		host := "http://" + r.Host
+		if strings.Contains(r.URL.Path, "app_id=1") {
+			fmt.Fprintf(w, `{"info":{"status":"OK"},"data":{"file":{"vername":"1.0.0","path":"%s/app.xapk"}}}`, host)
+			return
+		}
+		fmt.Fprintf(w, `{"info":{"status":"OK"},"data":{"file":{"vername":"1.0.0","path":"%s/apk"}}}`, host)
+	})
+	mux.HandleFunc("/apk", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/vnd.android.package-archive")
+		if _, err := w.Write(apkBody); err != nil {
+			panic(err)
+		}
+	})
+	mux.HandleFunc("/app.xapk", func(w http.ResponseWriter, r *http.Request) {
+		t.Fatal("bundle URL should not be downloaded")
+	})
+	srv := httptest.NewServer(mux)
+	t.Cleanup(srv.Close)
+
+	prevV, prevM := aptoideVersionsURL, aptoideMetaURLs
+	aptoideVersionsURL = srv.URL + "/versions/"
+	aptoideMetaURLs = []string{srv.URL + "/meta/"}
+	t.Cleanup(func() {
+		aptoideVersionsURL = prevV
+		aptoideMetaURLs = prevM
+	})
+
+	res, err := (&Aptoide{Client: srv.Client()}).Fetch(t.Context(), Request{PackageID: "com.example.app", Version: "1.0.0"}, t.TempDir())
+	if err != nil {
+		t.Fatalf("Fetch: %v", err)
+	}
+	if !strings.HasSuffix(res.URL, "/apk") {
+		t.Fatalf("url %q", res.URL)
+	}
+	if err := ValidateAPK(res.Path); err != nil {
+		t.Fatal(err)
 	}
 }
 
