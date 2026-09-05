@@ -18,10 +18,6 @@ depends = ["build"]
 # GITHUB_TOKEN improves rate limits; REVANCEDBOT_E2E_STRICT=1 fails soft steps too
 run = "go test -tags=e2e -count=1 -timeout=30m ./e2e/"
 
-[tasks."release:check"]
-description = "Validate .goreleaser.yaml"
-run = "goreleaser check"
-
 [tasks.release]
 description = "Tag with svu and run goreleaser"
 depends = ["test"]
