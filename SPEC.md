@@ -49,7 +49,7 @@ Inherited C (cite the file):
 | TEC-02 | Command result | Plumbing error → exit 1. Per-package failure is a skip, not a command failure. `run` exits 0 after a successful publish even when every package was skipped. `smoke` exits 1 when zero packages succeed. Machine lines on stdout only for `keys generate`, `list-jobs`, and `download`. Logs on stderr. Session folds logs when the TUI is active | Process status + streams |
 | TEC-03 | Stock package id + preferred versions + downloader order + optional CDP URL | Walk versions top to bottom. For each version walk downloaders in order. First file that passes ValidateAPK wins. CDP is an upgrade: each downloader decides whether it can finish. A downloader that cannot finish MUST fail that downloader only. `revancedbot` MUST continue with the next downloader. Exhausted versions → skip the Job | Stock APK path under Cache. Exhausted → skip |
 | TEC-04 | Cached patches file | Every package the patches advertise is a Job. One success per Job per run. First version that downloads and patches wins. Package work uses Isolate: one fail does not cancel siblings | Job list + per-package outcome |
-| TEC-05 | Stock APK + operator keystore + patches | ReVanced defaults. Package-rename patch always on. F-Droid id is stock id + `.revanced`. Sign with the operator keystore during patch | Patched APK under Cache work |
+| TEC-05 | Stock APK + SigningBlob + patches | ReVanced CLI applies patches. Package-rename patch always on. F-Droid id is stock id + `.revanced`. After patch, host `apksigner` signs the APK with the same SigningBlob that signs the F-Droid index. ReVanced CLI MUST NOT receive `--keystore` | Patched APK under Cache work |
 | TEC-06 | Pasteable secret | `keys generate` runs `keytool` and prints one blob. A run that signs MUST validate the blob and materialize the keystore only under Cache | SigningBlob; keystore file under Cache |
 | TEC-07 | Stage tree + host `fdroid` | Simple-binary `fdroid update` on the stage. Same SigningBlob signs the index. On success, atomic publish into live Repo. Failure leaves the previous publish | Published tree |
 | TEC-08 | Long work on an interactive terminal | Schedule real work through the Session (`Go`, `Map`, `Each`, `Isolate`). TUI starts lazily on the first scheduled task. Same TTY / `CI` / `NO_COLOR` / `TERM=dumb` guards as workspaced. Force TUI with `WORKSPACED_FORCE_TUI`. No `REVANCEDBOT_*` TUI flag. `keys generate` MUST NOT schedule a progress task | Progress UI when a task is scheduled on an interactive terminal. Otherwise logs |
@@ -71,7 +71,8 @@ Artifact preference inside one downloader: single APK, then universal / multi-AB
 | TEC-03 browser | `github.com/go-rod/rod` | wrap | rod launcher; in-process Chrome; a workspaced rod factory | none in workspaced `pkg/driver`; pattern `lewtec/fusionsolar-bot` `setupBrowser` |
 | TEC-04 jobs | ReVanced CLI `list-versions` | wrap | a second job catalog | `path:internal/revanced/jobs.go` |
 | TEC-04 isolate | workspaced `taskgroup` Isolate / Map | adopt | a sequential side path for package work | `path:internal/app/pipeline.go` |
-| TEC-05 | ReVanced CLI `java -jar` | wrap | a second patcher | `path:internal/revanced/patch.go` |
+| TEC-05 patch | ReVanced CLI `java -jar` | wrap | a second patcher | `path:internal/revanced/patch.go` |
+| TEC-05 sign | host `apksigner` | wrap | `--keystore` on ReVanced CLI | `path:internal/apksign/sign.go` |
 | TEC-06 | `keytool` | wrap | operator-facing keytool flags in the happy path | `path:internal/signing` |
 | TEC-07 | `fdroid` on PATH | wrap | `fdroid build` | `path:internal/fdroid` |
 | TEC-08 | workspaced `taskgroup` Session | adopt | a custom progress framework | `path:internal/cli/root.go` |
@@ -82,7 +83,7 @@ Artifact preference inside one downloader: single APK, then universal / multi-AB
 | Cell | Pick | C or D | Implements | Cite if C |
 |------|------|--------|------------|-----------|
 | Language | Go | C | TEC-01–TEC-08 | `go.mod` |
-| Runtime | this binary + host `java` / `fdroid` / `keytool` | C | TEC-05–TEC-07 | `internal/toolscheck` |
+| Runtime | this binary + host `java` / `fdroid` / `keytool` / `apksigner` | C | TEC-05–TEC-07 | `internal/toolscheck` |
 | Persistence | files: Repo + Cache | C | TEC-01, TEC-07 | `internal/workspace` |
 | UI | workspaced lazy TUI | C | TEC-08 | `internal/cli/root.go` |
 | Packaging | GoReleaser → GitHub Releases → consumer mise pin | D | distribution of this binary | this repository’s `mise.toml` names `goreleaser` |
@@ -127,7 +128,7 @@ Grammar: `revancedbot <command> [REPO]`. Persistent flags: `--cache` (empty → 
 | `fdroid-update REPO` | Repo | seed stage, `fdroid update`, publish | missing AuthorityDoc, missing tools, `fdroid` fail, publish fail → exit 1 |
 | `fetch-tools REPO` | Cache | latest CLI jar + patches into Cache | resolve fail, download fail → exit 1 |
 | `download REPO` | Cache | one stock APK via TEC-03 | missing AuthorityDoc, missing `--package`, every downloader fails → exit 1 |
-| `patch REPO` | Cache | TEC-05 on `--in` → `--out` | missing `--in` / `--out`, missing tools, CLI fail → exit 1 |
+| `patch REPO` | Cache | TEC-05 on `--in` → `--out` | missing `--in` / `--out`, missing tools, CLI fail, `apksigner` fail → exit 1 |
 | `list-jobs REPO` | none (stdout) | TEC-04 print | tool fetch fail, parse fail → exit 1 |
 | `keys generate` | none (stdout) | TEC-06 print one line | missing `keytool` → exit 1 |
 | `keys validate REPO` | Cache | materialize keystore | missing SigningBlob, invalid SigningBlob → exit 1 |
@@ -210,7 +211,7 @@ Cache is a workspace, not a second aggregate root. An explicit `--cache` path is
 | `fetch-tools REPO` | resolve fail, download fail | exit 1 |
 | `download REPO` | missing AuthorityDoc, missing `--package` | exit 1 |
 | `download REPO` | every downloader fails (including give-up without CDP) | exit 1 |
-| `patch REPO` | missing flags, CLI fail | exit 1 |
+| `patch REPO` | missing flags, CLI fail, `apksigner` fail | exit 1 |
 | `list-jobs REPO` | fetch fail, parse fail | exit 1 |
 | `keys generate` | missing `keytool` | exit 1; no stdout blob |
 | `keys validate REPO` | missing SigningBlob, invalid SigningBlob | exit 1 |
@@ -291,6 +292,7 @@ Residual risk: a hostile store can still serve a real APK for the requested stoc
 
 - Two directories (Repo vs Cache) and simple-binary output only. Rejected: dump APKs to Pages from this repository; `fdroid build`.
 - Signing via one pasteable blob and `keytool` behind `keys generate`. Rejected: operator-managed keytool flags; keystore in Repo.
+- ReVanced CLI patches; host `apksigner` signs the APK with the same SigningBlob as the F-Droid index. Rejected: pass `--keystore` to ReVanced CLI.
 - Progress is workspaced Session. Rejected: a custom bar framework.
 - Always stage a successful patch, including a versionCode already in the tree. Rejected: skip staging on duplicate versionCode.
 - Rod connects to an Operator CDP URL only, same as fusionsolar-bot. Rejected: in-process launcher; require CDP for `revancedbot` to start.
