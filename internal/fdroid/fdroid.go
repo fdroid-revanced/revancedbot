@@ -107,23 +107,13 @@ func EnsureLayout(root string) error {
 
 // SeedStage copies existing live REPO repo/ and metadata/ into stage (for history).
 // If live is missing or fails structure validation, starts an empty stage (regen).
-// Corrupt JSON under live is stripped when possible; if still invalid, seed is skipped.
+// Live {repo,metadata,config.yml} are not written; corrupt JSON is stripped on the stage copy only.
 func SeedStage(stageRoot, liveRepo string) error {
 	if err := os.RemoveAll(stageRoot); err != nil {
 		return err
 	}
 	if err := EnsureLayout(stageRoot); err != nil {
 		return err
-	}
-	// Prefer clean live; strip bad JSON leftovers before deciding to seed.
-	// Live may be empty or partially cleaned; seed validation handles the rest.
-	if err := RemovePublishLeftovers(liveRepo); err != nil {
-		// continue with best-effort seed
-	}
-	if repoDir := filepath.Join(liveRepo, "repo"); dirExists(repoDir) {
-		if _, err := SanitizeJSONTree(repoDir); err != nil {
-			return fmt.Errorf("sanitize live repo JSON: %w", err)
-		}
 	}
 	if err := ValidateLiveForSeed(liveRepo); err != nil {
 		// Outside happy path: do not copy garbage; empty stage (fdroid update will regen indexes).
@@ -146,7 +136,7 @@ func SeedStage(stageRoot, liveRepo string) error {
 			return fmt.Errorf("seed %s: %w", name, err)
 		}
 	}
-	// After copy, strip any remaining bad JSON; if tree still invalid, abort (do not publish garbage).
+	// Strip corrupt JSON on the stage copy only (INV-01: live is unchanged until Publish).
 	if _, err := SanitizeJSONTree(filepath.Join(stageRoot, "repo")); err != nil {
 		return err
 	}
@@ -154,11 +144,6 @@ func SeedStage(stageRoot, liveRepo string) error {
 		return fmt.Errorf("seed produced invalid structure (fix live repo or wipe repo/): %w", err)
 	}
 	return nil
-}
-
-func dirExists(p string) bool {
-	st, err := os.Stat(p)
-	return err == nil && st.IsDir()
 }
 
 // StageAPK copies a patched APK into stage/repo/ (atomic write).

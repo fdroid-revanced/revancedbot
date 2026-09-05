@@ -61,6 +61,7 @@ func ValidateJSONTree(root string) error {
 }
 
 // SanitizeJSONTree removes invalid/empty *.json files under root so fdroid can regen.
+// Pass a disposable tree (CACHE/fdroid/repo), not live REPO.
 // Returns count removed.
 func SanitizeJSONTree(root string) (int, error) {
 	n := 0
@@ -143,26 +144,15 @@ func ValidateStageAfterUpdate(stageRoot string) error {
 }
 
 // ValidateLiveForSeed checks live REPO before seeding. Missing repo/metadata is OK (empty seed).
-// Corrupt JSON or leftover publish dirs is not OK (caller should regen without seeding).
+// Broken layout skips seed. Read-only: leftover dirs and corrupt JSON are not deleted.
 func ValidateLiveForSeed(liveRepo string) error {
-	if err := RemovePublishLeftovers(liveRepo); err != nil {
-		return err
-	}
 	// If neither repo nor metadata exist, empty is fine.
 	repoDir := filepath.Join(liveRepo, "repo")
 	metaDir := filepath.Join(liveRepo, "metadata")
 	_, errR := os.Stat(repoDir)
 	_, errM := os.Stat(metaDir)
-	if os.IsNotExist(errR) && os.IsNotExist(errM) {
+	if errors.Is(errR, fs.ErrNotExist) && errors.Is(errM, fs.ErrNotExist) {
 		return nil
 	}
-	if err := ValidateLayout(liveRepo); err != nil {
-		return err
-	}
-	if errR == nil {
-		if err := ValidateJSONTree(repoDir); err != nil {
-			return err
-		}
-	}
-	return nil
+	return ValidateLayout(liveRepo)
 }
