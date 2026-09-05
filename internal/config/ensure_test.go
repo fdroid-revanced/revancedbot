@@ -102,6 +102,20 @@ func TestEnsureRepoDir_rejectsFile(t *testing.T) {
 	}
 }
 
+func TestConfig_LogLevelOrDefault(t *testing.T) {
+	t.Parallel()
+	var none *Config
+	if got := none.LogLevelOrDefault(); got != "info" {
+		t.Fatalf("nil Config LogLevelOrDefault=%q, want info", got)
+	}
+	if got := (&Config{}).LogLevelOrDefault(); got != "info" {
+		t.Fatalf("empty LogLevelOrDefault=%q, want info", got)
+	}
+	if got := (&Config{LogLevel: "debug"}).LogLevelOrDefault(); got != "debug" {
+		t.Fatalf("LogLevelOrDefault=%q, want debug", got)
+	}
+}
+
 func TestParseLogLevel(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
