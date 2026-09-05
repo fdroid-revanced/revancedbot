@@ -54,7 +54,7 @@ func (a *App) LoadSigning() error {
 	if err != nil {
 		return err
 	}
-	if err := blob.Materialize(a.WS.KeystorePath); err != nil {
+	if err := blob.Materialize(a.WS.Cache); err != nil {
 		return err
 	}
 	a.Blob = blob
@@ -74,7 +74,7 @@ func (a *App) PrepareStage() error {
 		Name:        a.Cfg.RepoName,
 		URL:         a.Cfg.RepoURL,
 		Description: a.Cfg.RepoDescription,
-	}, a.WS.KeystorePath, a.Blob)
+	}, a.WS.Cache, a.WS.Repo, a.WS.KeystorePath, a.Blob)
 }
 
 // WriteFDroidConfig is an alias for PrepareStage (stage-only config).

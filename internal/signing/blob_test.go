@@ -4,8 +4,12 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"errors"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/lucasew/revancedbot/internal/workspace"
 )
 
 func TestBlobRoundTrip(t *testing.T) {
@@ -125,5 +129,50 @@ func TestEncode_rejectsPKCS12(t *testing.T) {
 				t.Fatalf("Encode(%s) err = %v; want %v", tt.name, err, ErrPKCS12)
 			}
 		})
+	}
+}
+
+func TestMaterialize_requiresCache(t *testing.T) {
+	b := &Blob{
+		V:           1,
+		KeystoreB64: "AAAA",
+		StorePass:   "store",
+		KeyPass:     "key",
+		Alias:       "a",
+	}
+	if err := b.Materialize(""); err == nil {
+		t.Fatal("expected error")
+	}
+	if err := b.Materialize("   "); !errors.Is(err, ErrBase) {
+		t.Fatalf("err = %v, want wrap ErrBase", err)
+	}
+}
+
+func TestMaterialize_writesOnlyCacheSigning(t *testing.T) {
+	cache := t.TempDir()
+	repo := t.TempDir()
+	b := &Blob{
+		V:           1,
+		KeystoreB64: "AAAA",
+		StorePass:   "store",
+		KeyPass:     "key",
+		Alias:       "a",
+	}
+	err := b.Materialize(cache)
+	dest := workspace.KeystoreFile(cache)
+	if _, statErr := os.Stat(dest); statErr != nil {
+		t.Fatalf("missing %s: %v (materialize err %v)", dest, statErr, err)
+	}
+	if filepath.Base(dest) != "keystore.jks" || filepath.Base(filepath.Dir(dest)) != "signing" {
+		t.Fatalf("dest %s is not CACHE/signing/keystore.jks", dest)
+	}
+	if err == nil {
+		t.Fatal("expected keytool validate error for dummy keystore")
+	}
+	if _, err := os.Stat(filepath.Join(repo, "keystore.jks")); err == nil {
+		t.Fatal("keystore must not be written under repo")
+	}
+	if _, err := os.Stat(filepath.Join(cache, "keystore.jks")); err == nil {
+		t.Fatal("keystore must not be written at cache root")
 	}
 }
