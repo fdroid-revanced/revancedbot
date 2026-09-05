@@ -54,11 +54,7 @@ func formatJobs(jobs []revanced.Job) []string {
 				vers[i] = v
 			}
 		}
-		if len(vers) == 0 {
-			out = append(out, j.PackageID)
-		} else {
-			out = append(out, fmt.Sprintf("%s\t%s", j.PackageID, strings.Join(vers, ",")))
-		}
+		out = append(out, fmt.Sprintf("%s\t%s", j.PackageID, strings.Join(vers, ",")))
 	}
 	return out
 }

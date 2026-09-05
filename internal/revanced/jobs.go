@@ -28,11 +28,12 @@ func ListJobs(javaBin, cliJar, patchesRVP string) ([]Job, error) {
 	if err := cmd.Run(); err != nil {
 		return nil, fmt.Errorf("list-versions: %w\n%s", err, stderr.String())
 	}
-	return ParseListVersions(stdout.String()), nil
+	return ParseListVersions(stdout.String())
 }
 
 // ParseListVersions parses revanced-cli list-versions text output.
-func ParseListVersions(data string) []Job {
+// Non-empty input that yields no Jobs is a parse error (AS-01 fail-closed).
+func ParseListVersions(data string) ([]Job, error) {
 	var jobs []Job
 	var cur *Job
 
@@ -91,7 +92,10 @@ func ParseListVersions(data string) []Job {
 		seen[j.PackageID] = len(out)
 		out = append(out, j)
 	}
-	return out
+	if data != "" && len(out) == 0 {
+		return nil, fmt.Errorf("list-versions: unparseable output: %w", ErrBase)
+	}
+	return out, nil
 }
 
 func looksLikeVersion(s string) bool {
