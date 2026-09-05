@@ -162,11 +162,11 @@ func apkpureURLsForVersion(body []byte, want string) ([]string, error) {
 	return urls, nil
 }
 
-var apkpureGluedVerRe = regexp.MustCompile(`x\d+\.\d+(?:\.\d+)*:`)
+var apkpureGluedVersionRegexp = regexp.MustCompile(`x\d+\.\d+(?:\.\d+)*:`)
 
 func apkpureHits(body []byte) []apkpureHit {
 	text := string(body)
-	verRe := regexp.MustCompile(`[^0-9](\d+\.\d+(?:\.\d+)*)\:`)
+	versionRegexp := regexp.MustCompile(`[^0-9](\d+\.\d+(?:\.\d+)*)\:`)
 	prefs := []string{apkpureCDN + "/b/APK/", apkpureCDN + "/b/XAPK/"}
 	var hits []apkpureHit
 	for pos := 0; pos < len(text); {
@@ -181,8 +181,8 @@ func apkpureHits(body []byte) []apkpureHit {
 			start = 0
 		}
 		ver := ""
-		if vm := verRe.FindAllStringSubmatch(text[start:abs], -1); len(vm) > 0 {
-			ver = vm[len(vm)-1][1]
+		if matches := versionRegexp.FindAllStringSubmatch(text[start:abs], -1); len(matches) > 0 {
+			ver = matches[len(matches)-1][1]
 		}
 		hits = append(hits, apkpureHit{Version: ver, URL: url})
 		pos = abs + len(pref)
@@ -211,7 +211,7 @@ func trimAPKPureURL(s string) string {
 			s = s[:i+1]
 		}
 	}
-	if loc := apkpureGluedVerRe.FindStringIndex(s); loc != nil {
+	if loc := apkpureGluedVersionRegexp.FindStringIndex(s); loc != nil {
 		s = s[:loc[0]]
 	}
 	return s
