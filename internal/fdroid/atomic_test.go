@@ -18,6 +18,13 @@ func TestWriteFileAtomic(t *testing.T) {
 	if err != nil || string(b) != "hello" {
 		t.Fatalf("got %q err %v", b, err)
 	}
+	st, err := os.Stat(p)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if st.Mode().Perm() != 0o644 {
+		t.Fatalf("perm=%o want 644", st.Mode().Perm())
+	}
 }
 
 func writeValidStage(t *testing.T, stage string) {
