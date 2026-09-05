@@ -362,23 +362,35 @@ type pkgOutcome struct {
 	Skip    string // non-empty when soft-skipped
 }
 
+// Test hooks. Production values call the App methods / toolscheck.
+var (
+	checkTools     = func() error { return toolscheck.Check(toolscheck.DefaultRun()) }
+	loadSigning    = (*App).LoadSigning
+	prepareStage   = (*App).WriteFDroidConfig
+	fetchTools     = (*App).FetchTools
+	listJobs       = (*App).ListJobs
+	processPackage = (*App).ProcessPackage
+	fdroidUpdate   = (*App).FDroidUpdate
+	publishStage   = (*App).PublishStage
+)
+
 // RunFull is the kitchen-sink pipeline for REPO.
 func (a *App) RunFull(ctx context.Context) error {
-	if err := toolscheck.Check(toolscheck.DefaultRun()); err != nil {
+	if err := checkTools(); err != nil {
 		return err
 	}
 	log := logging.GetLogger(ctx)
-	if err := a.LoadSigning(); err != nil {
+	if err := loadSigning(a); err != nil {
 		return err
 	}
-	if err := a.WriteFDroidConfig(); err != nil {
+	if err := prepareStage(a); err != nil {
 		return err
 	}
-	if err := a.FetchTools(ctx); err != nil {
+	if err := fetchTools(a, ctx); err != nil {
 		return err
 	}
 
-	jobs, err := a.ListJobs()
+	jobs, err := listJobs(a)
 	if err != nil {
 		return err
 	}
@@ -398,7 +410,7 @@ func (a *App) RunFull(ctx context.Context) error {
 		Fn: func(ctx context.Context, s *taskgroup.Status, job revanced.Job) (pkgOutcome, error) {
 			s.Update("process " + job.PackageID)
 			err := taskgroup.Isolate(ctx, func(ctx context.Context) error {
-				return a.ProcessPackage(ctx, job)
+				return processPackage(a, ctx, job)
 			})
 			if err != nil {
 				logging.GetLogger(ctx).Warn("skip package", "package", job.PackageID, "err", err)
@@ -442,11 +454,11 @@ func (a *App) RunFull(ctx context.Context) error {
 	}
 
 	log.Info("running fdroid update", "stage", a.WS.Stage)
-	if err := a.FDroidUpdate(ctx, true); err != nil {
+	if err := fdroidUpdate(a, ctx, true); err != nil {
 		return err
 	}
 	log.Info("publishing stage to REPO", "stage", a.WS.Stage, "repo", a.WS.Repo)
-	if err := a.PublishStage(); err != nil {
+	if err := publishStage(a); err != nil {
 		return err
 	}
 	log.Info("done", "repo", a.WS.Repo)
@@ -455,19 +467,19 @@ func (a *App) RunFull(ctx context.Context) error {
 
 // RunSmoke tries packages until maxOK succeed (or list exhausted). For TMP e2e.
 func (a *App) RunSmoke(ctx context.Context, maxOK int) (ok int, err error) {
-	if err := toolscheck.Check(toolscheck.DefaultRun()); err != nil {
+	if err := checkTools(); err != nil {
 		return 0, err
 	}
-	if err := a.LoadSigning(); err != nil {
+	if err := loadSigning(a); err != nil {
 		return 0, err
 	}
-	if err := a.WriteFDroidConfig(); err != nil {
+	if err := prepareStage(a); err != nil {
 		return 0, err
 	}
-	if err := a.FetchTools(ctx); err != nil {
+	if err := fetchTools(a, ctx); err != nil {
 		return 0, err
 	}
-	jobs, err := a.ListJobs()
+	jobs, err := listJobs(a)
 	if err != nil {
 		return 0, err
 	}
@@ -507,7 +519,7 @@ func (a *App) RunSmoke(ctx context.Context, maxOK int) (ok int, err error) {
 			s.Update(job.PackageID)
 			log.Info("smoke try", "package", job.PackageID)
 			err := taskgroup.Isolate(ctx, func(ctx context.Context) error {
-				return a.ProcessPackage(ctx, job)
+				return processPackage(a, ctx, job)
 			})
 			if err != nil {
 				log.Warn("smoke skip", "package", job.PackageID, "err", err)
@@ -524,10 +536,10 @@ func (a *App) RunSmoke(ctx context.Context, maxOK int) (ok int, err error) {
 	if ok == 0 {
 		return 0, fmt.Errorf("no package succeeded download+patch (tried %d jobs): %w", len(jobs), ErrBase)
 	}
-	if err := a.FDroidUpdate(ctx, true); err != nil {
+	if err := fdroidUpdate(a, ctx, true); err != nil {
 		return ok, err
 	}
-	if err := a.PublishStage(); err != nil {
+	if err := publishStage(a); err != nil {
 		return ok, err
 	}
 	return ok, nil

@@ -5,8 +5,13 @@ import (
 
 	"github.com/lucasew/revancedbot/internal/signing"
 	"github.com/lucasew/revancedbot/internal/toolscheck"
-	"github.com/spf13/cobra"
 	"github.com/lucasew/workspaced/pkg/logging"
+	"github.com/spf13/cobra"
+)
+
+var (
+	checkKeyTools = func() error { return toolscheck.Check(toolscheck.KeysOnly()) }
+	generateKeys  = signing.Generate
 )
 
 func newKeysCmd() *cobra.Command {
@@ -25,7 +30,7 @@ func newKeysGenerateCmd() *cobra.Command {
 		Short: "Generate a keystore and print one pasteable signing secret",
 		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			if err := toolscheck.Check(toolscheck.KeysOnly()); err != nil {
+			if err := checkKeyTools(); err != nil {
 				return err
 			}
 			// Intentionally no taskgroup.Go: starting the bubbletea Session UI for a
@@ -33,7 +38,7 @@ func newKeysGenerateCmd() *cobra.Command {
 			// pasteable secret on stdout. Session still Enter/Close with zero tasks.
 			ctx := ctxOf(cmd)
 			log := logging.GetLogger(ctx)
-			enc, err := signing.Generate(alias)
+			enc, err := generateKeys(alias)
 			if err != nil {
 				return err
 			}
