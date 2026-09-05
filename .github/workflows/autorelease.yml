@@ -40,7 +40,7 @@ jobs:
       - uses: jdx/mise-action@6d1e696aa24c1aa1bcc1adea0212707c71ab78a8 # v3
 
       - name: Validate GoReleaser config
-        run: mise run release:check
+        run: goreleaser check
 
       - name: Snapshot build (PR / main)
         if: github.event_name == 'pull_request' || (github.event_name == 'push' && github.ref == 'refs/heads/main')
@@ -51,9 +51,4 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           NEW_VERSION: ${{ github.event.inputs.new_version }}
-        run: |
-          set -euo pipefail
-          echo "Existing tags (top):"
-          git tag --sort=-v:refname | head -10 || true
-          echo "svu current=$(svu current 2>/dev/null || true) next=$(svu next) minor=$(svu minor) patch=$(svu patch)"
-          mise run release -- "${NEW_VERSION:-next}"
+        run: mise run release -- "${NEW_VERSION:-next}"
