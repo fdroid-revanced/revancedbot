@@ -9,6 +9,9 @@ import (
 	"github.com/lucasew/revancedbot/internal/osx"
 )
 
+// livePublishNames is the Repo triple swapped as one unit (INV-01).
+var livePublishNames = []string{"config.yml", "repo", "metadata"}
+
 // WriteFileAtomic writes data to path via a same-dir temp file + rename.
 func WriteFileAtomic(path string, data []byte, perm os.FileMode) error {
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
@@ -32,10 +35,9 @@ type PublishArgs struct {
 	LayoutOnly bool
 }
 
-// Publish replaces live REPO publishable paths with the stage tree atomically
-// (per entry: write under REPO/.publish-*, rename swap).
-// Stage must contain config.yml, repo/, metadata/.
-// LayoutOnly skips the index-artifact gate. run / smoke / fdroid-update leave it false.
+// Publish replaces live REPO {config.yml,repo,metadata} from stage as one unit.
+// Stage must contain those paths. LayoutOnly skips the index-artifact gate;
+// run / smoke / fdroid-update leave it false.
 // revancedbot.yaml in REPO is never touched.
 func Publish(args PublishArgs) error {
 	check := ValidateStageAfterUpdate
@@ -51,72 +53,84 @@ func Publish(args PublishArgs) error {
 	if err := os.MkdirAll(args.Live, 0o755); err != nil {
 		return err
 	}
-	// Files
-	if err := publishFile(filepath.Join(args.Stage, "config.yml"), filepath.Join(args.Live, "config.yml")); err != nil {
-		return fmt.Errorf("publish config.yml: %w", err)
-	}
-	// Directories
-	for _, name := range []string{"repo", "metadata"} {
-		src := filepath.Join(args.Stage, name)
-		dst := filepath.Join(args.Live, name)
-		if err := publishDir(src, dst); err != nil {
+
+	for _, name := range livePublishNames {
+		if err := stagePublishEntry(filepath.Join(args.Stage, name), publishTmp(args.Live, name)); err != nil {
+			removePublishTemps(args.Live)
 			return fmt.Errorf("publish %s: %w", name, err)
 		}
+	}
+
+	var swapped []string
+	for _, name := range livePublishNames {
+		if err := swapPublishEntry(args.Live, name); err != nil {
+			rollbackPublish(args.Live, swapped)
+			removePublishTemps(args.Live)
+			return fmt.Errorf("publish %s: %w", name, err)
+		}
+		swapped = append(swapped, name)
+	}
+	for _, name := range livePublishNames {
+		osx.RemoveAll(publishOld(args.Live, name))
 	}
 	return nil
 }
 
-func publishFile(src, dst string) error {
+func publishTmp(root, name string) string {
+	return filepath.Join(root, "."+name+".new")
+}
+
+func publishOld(root, name string) string {
+	return filepath.Join(root, "."+name+".old")
+}
+
+func stagePublishEntry(src, tmp string) error {
+	osx.RemoveAll(tmp)
 	st, err := os.Stat(src)
 	if err != nil {
 		return err
 	}
 	if st.IsDir() {
-		return fmt.Errorf("%s is a directory: %w", src, ErrBase)
+		return copyDir(src, tmp)
 	}
-	data, err := os.ReadFile(src)
-	if err == nil {
-		return WriteFileAtomic(dst, data, 0o600)
-	}
-	return err
+	return copyFile(src, tmp, 0o600)
 }
 
-func publishDir(src, dst string) error {
-	st, err := os.Stat(src)
-	if err != nil {
-		return err
-	}
-	if !st.IsDir() {
-		return fmt.Errorf("%s is not a directory: %w", src, ErrBase)
-	}
-	parent := filepath.Dir(dst)
-	base := filepath.Base(dst)
-	tmp := filepath.Join(parent, "."+base+".new")
-	old := filepath.Join(parent, "."+base+".old")
-
-	osx.RemoveAll(tmp)
+func swapPublishEntry(root, name string) error {
+	dst := filepath.Join(root, name)
+	tmp := publishTmp(root, name)
+	old := publishOld(root, name)
 	osx.RemoveAll(old)
-
-	if err := copyDir(src, tmp); err != nil {
-		osx.RemoveAll(tmp)
-		return err
-	}
-
-	// Swap: dst -> old, tmp -> dst
 	if _, err := os.Stat(dst); err == nil {
 		if err := os.Rename(dst, old); err != nil {
-			osx.RemoveAll(tmp)
 			return err
 		}
 	}
 	if err := os.Rename(tmp, dst); err != nil {
-		// best-effort restore
 		osx.Rename(old, dst)
 		osx.RemoveAll(tmp)
 		return err
 	}
-	osx.RemoveAll(old)
 	return nil
+}
+
+func rollbackPublish(root string, names []string) {
+	for i := len(names) - 1; i >= 0; i-- {
+		name := names[i]
+		old := publishOld(root, name)
+		if _, err := os.Stat(old); err != nil {
+			continue
+		}
+		dst := filepath.Join(root, name)
+		osx.RemoveAll(dst)
+		osx.Rename(old, dst)
+	}
+}
+
+func removePublishTemps(root string) {
+	for _, name := range livePublishNames {
+		osx.RemoveAll(publishTmp(root, name))
+	}
 }
 
 func copyDir(src, dst string) error {
