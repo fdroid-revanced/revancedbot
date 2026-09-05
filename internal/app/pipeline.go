@@ -84,7 +84,7 @@ func (a *App) WriteFDroidConfig() error {
 
 // PublishStage atomically replaces REPO/{repo,metadata,config.yml} from CACHE/fdroid.
 func (a *App) PublishStage() error {
-	return fdroid.Publish(a.WS.Stage, a.WS.Repo, false)
+	return fdroid.Publish(fdroid.PublishArgs{Stage: a.WS.Stage, Live: a.WS.Repo})
 }
 
 // FetchTools downloads CLI + patches into CACHE.

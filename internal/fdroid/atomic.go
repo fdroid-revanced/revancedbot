@@ -25,33 +25,40 @@ func WriteFileAtomic(path string, data []byte, perm os.FileMode) error {
 	return nil
 }
 
+// PublishArgs is the stage→live swap. LayoutOnly skips the index-artifact gate (fdroid-init).
+type PublishArgs struct {
+	Stage      string
+	Live       string
+	LayoutOnly bool
+}
+
 // Publish replaces live REPO publishable paths with the stage tree atomically
 // (per entry: write under REPO/.publish-*, rename swap).
 // Stage must contain config.yml, repo/, metadata/.
-// layoutOnly skips the index-artifact gate (fdroid-init). run / smoke / fdroid-update pass false.
+// LayoutOnly skips the index-artifact gate. run / smoke / fdroid-update leave it false.
 // revancedbot.yaml in REPO is never touched.
-func Publish(stageRoot, liveRepo string, layoutOnly bool) error {
+func Publish(args PublishArgs) error {
 	check := ValidateStageAfterUpdate
-	if layoutOnly {
+	if args.LayoutOnly {
 		check = ValidateStageLayout
 	}
-	if err := check(stageRoot); err != nil {
+	if err := check(args.Stage); err != nil {
 		return fmt.Errorf("publish aborted: %w", err)
 	}
-	if err := RemovePublishLeftovers(liveRepo); err != nil {
+	if err := RemovePublishLeftovers(args.Live); err != nil {
 		return err
 	}
-	if err := os.MkdirAll(liveRepo, 0o755); err != nil {
+	if err := os.MkdirAll(args.Live, 0o755); err != nil {
 		return err
 	}
 	// Files
-	if err := publishFile(filepath.Join(stageRoot, "config.yml"), filepath.Join(liveRepo, "config.yml")); err != nil {
+	if err := publishFile(filepath.Join(args.Stage, "config.yml"), filepath.Join(args.Live, "config.yml")); err != nil {
 		return fmt.Errorf("publish config.yml: %w", err)
 	}
 	// Directories
 	for _, name := range []string{"repo", "metadata"} {
-		src := filepath.Join(stageRoot, name)
-		dst := filepath.Join(liveRepo, name)
+		src := filepath.Join(args.Stage, name)
+		dst := filepath.Join(args.Live, name)
 		if err := publishDir(src, dst); err != nil {
 			return fmt.Errorf("publish %s: %w", name, err)
 		}
