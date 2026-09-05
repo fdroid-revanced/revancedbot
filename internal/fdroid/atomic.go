@@ -27,10 +27,15 @@ func WriteFileAtomic(path string, data []byte, perm os.FileMode) error {
 
 // Publish replaces live REPO publishable paths with the stage tree atomically
 // (per entry: write under REPO/.publish-*, rename swap).
-// Stage must contain config.yml, repo/, metadata/ after a successful fdroid update.
+// Stage must contain config.yml, repo/, metadata/.
+// layoutOnly skips the index-artifact gate (fdroid-init). run / smoke / fdroid-update pass false.
 // revancedbot.yaml in REPO is never touched.
-func Publish(stageRoot, liveRepo string) error {
-	if err := ValidateStageAfterUpdate(stageRoot); err != nil {
+func Publish(stageRoot, liveRepo string, layoutOnly bool) error {
+	check := ValidateStageAfterUpdate
+	if layoutOnly {
+		check = ValidateStageLayout
+	}
+	if err := check(stageRoot); err != nil {
 		return fmt.Errorf("publish aborted: %w", err)
 	}
 	if err := RemovePublishLeftovers(liveRepo); err != nil {

@@ -4,10 +4,11 @@ import (
 	"context"
 
 	"github.com/lucasew/revancedbot/internal/config"
+	"github.com/lucasew/revancedbot/internal/fdroid"
 	"github.com/lucasew/revancedbot/internal/toolscheck"
-	"github.com/spf13/cobra"
 	"github.com/lucasew/workspaced/pkg/logging"
 	"github.com/lucasew/workspaced/pkg/taskgroup"
+	"github.com/spf13/cobra"
 )
 
 func newFDroidInitCmd() *cobra.Command {
@@ -35,7 +36,7 @@ func newFDroidInitCmd() *cobra.Command {
 			if err := a.PrepareStage(); err != nil {
 				return err
 			}
-			if err := a.PublishStage(); err != nil {
+			if err := fdroid.Publish(a.WS.Stage, a.WS.Repo, true); err != nil {
 				return err
 			}
 			log.Info("fdroid init ok",

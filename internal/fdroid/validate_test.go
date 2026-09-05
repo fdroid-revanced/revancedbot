@@ -54,6 +54,25 @@ func TestValidateStageAfterUpdate(t *testing.T) {
 	}
 }
 
+func TestValidateStageLayout(t *testing.T) {
+	stage := t.TempDir()
+	if err := ValidateStageLayout(stage); err == nil {
+		t.Fatal("expected error without repo/metadata")
+	}
+	if err := EnsureLayout(stage); err != nil {
+		t.Fatal(err)
+	}
+	if err := ValidateStageLayout(stage); err == nil {
+		t.Fatal("expected error without config.yml")
+	}
+	if err := os.WriteFile(filepath.Join(stage, "config.yml"), []byte("repo_name: t\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := ValidateStageLayout(stage); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestSeedStageSkipsCorruptLive(t *testing.T) {
 	live := t.TempDir()
 	stage := t.TempDir()
