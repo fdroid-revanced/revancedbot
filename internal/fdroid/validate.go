@@ -137,6 +137,13 @@ func publishUnitIncomplete(root string) bool {
 			anyNew = true
 		}
 	}
+	if entries, err := os.ReadDir(root); err == nil {
+		for _, e := range entries {
+			if isPublishTempName(e.Name()) && !strings.HasSuffix(e.Name(), ".old") {
+				anyNew = true
+			}
+		}
+	}
 	return missingWithOld || (anyOld && anyNew)
 }
 
@@ -150,10 +157,7 @@ func deletePublishLeftovers(root string) error {
 	}
 	for _, e := range entries {
 		name := e.Name()
-		if !strings.HasPrefix(name, ".") {
-			continue
-		}
-		if !strings.HasSuffix(name, ".new") && !strings.HasSuffix(name, ".old") {
+		if !isPublishTempName(name) {
 			continue
 		}
 		if err := os.RemoveAll(filepath.Join(root, name)); err != nil {
