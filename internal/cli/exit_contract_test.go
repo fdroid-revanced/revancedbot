@@ -2,10 +2,13 @@ package cli
 
 import (
 	"bytes"
+	"errors"
 	"io"
 	"os"
 	"strings"
 	"testing"
+
+	"github.com/lucasew/revancedbot/internal/config"
 )
 
 func TestRun_missingAuthorityDoc(t *testing.T) {
@@ -18,16 +21,9 @@ func TestRun_missingAuthorityDoc(t *testing.T) {
 	if err == nil {
 		t.Fatal("run: missing REPO/revancedbot.yaml and no --config must error")
 	}
-	msg := strings.ToLower(err.Error())
-	if strings.Contains(msg, "revancedbot.yaml") || strings.Contains(msg, "authority") || strings.Contains(msg, "config") {
-		return
+	if !errors.Is(err, config.ErrMissingAuthorityDoc) {
+		t.Fatalf("run: want ErrMissingAuthorityDoc, got %v", err)
 	}
-	// Current main still fails first on host tools or SigningBlob. T01 refuses
-	// the missing AuthorityDoc before those checks, which makes this pass.
-	if strings.Contains(msg, "signing") || strings.Contains(msg, "tools") || strings.Contains(msg, "apksigner") {
-		t.Skipf("pending T01 AuthorityDoc refusal, got %v", err)
-	}
-	t.Fatalf("run: want missing AuthorityDoc error, got %v", err)
 }
 
 func TestKeysGenerate_stdoutOneLine(t *testing.T) {

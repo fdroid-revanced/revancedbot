@@ -137,11 +137,23 @@ func CloseSession() error {
 	return nil
 }
 
-func loadApp(cmd *cobra.Command, args []string) (*app.App, error) {
+type loadOpts struct {
+	requireDoc bool
+}
+
+func loadApp(args []string, opts loadOpts) (*app.App, error) {
 	if len(args) < 1 {
 		return nil, fmt.Errorf("missing REPO path (F-Droid simple-binary root): %w", ErrBase)
 	}
-	cfg, err := config.LoadFromRepo(args[0], cacheFlag, cfgFile)
+	var (
+		cfg *config.Config
+		err error
+	)
+	if opts.requireDoc {
+		cfg, err = config.LoadFromRepoRequired(args[0], cacheFlag, cfgFile)
+	} else {
+		cfg, err = config.LoadFromRepo(args[0], cacheFlag, cfgFile)
+	}
 	if err != nil {
 		return nil, err
 	}

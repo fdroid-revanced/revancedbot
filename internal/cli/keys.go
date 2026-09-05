@@ -61,7 +61,7 @@ func newKeysValidateCmd() *cobra.Command {
 			if err := toolscheck.Check(toolscheck.KeysOnly()); err != nil {
 				return err
 			}
-			a, err := loadApp(cmd, args)
+			a, err := loadApp(args, loadOpts{})
 			if err != nil {
 				return err
 			}
