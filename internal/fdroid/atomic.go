@@ -21,13 +21,20 @@ func WriteFileAtomic(path string, data []byte, perm os.FileMode) error {
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		return err
 	}
-	if err := ioatomic.WriteFileFunction(path, func(w io.Writer) error {
-		_, err := w.Write(data)
-		return err
-	}); err != nil {
+	op := ioatomic.NewOperation(path, true)
+	if err := os.WriteFile(op.StagingPath(), data, perm); err != nil {
+		rollbackOp(&op)
 		return err
 	}
-	return os.Chmod(path, perm)
+	if err := os.Chmod(op.StagingPath(), perm); err != nil {
+		rollbackOp(&op)
+		return err
+	}
+	if err := op.Commit(); err != nil {
+		rollbackOp(&op)
+		return err
+	}
+	return nil
 }
 
 // PublishArgs is the stage→live swap. LayoutOnly skips the index-artifact gate (fdroid-init).
