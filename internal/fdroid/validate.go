@@ -112,15 +112,23 @@ func RemovePublishLeftovers(root string) error {
 	return nil
 }
 
-// ValidateStageAfterUpdate checks the stage after a successful `fdroid update`.
-// Aborts outside happy path: layout, config.yml, valid indexes, all JSON valid.
-func ValidateStageAfterUpdate(stageRoot string) error {
+// ValidateStageLayout checks config.yml + repo/ + metadata/. Indexes are not required.
+func ValidateStageLayout(stageRoot string) error {
 	if err := ValidateLayout(stageRoot); err != nil {
 		return err
 	}
 	cfg := filepath.Join(stageRoot, "config.yml")
 	if st, err := os.Stat(cfg); err != nil || st.IsDir() {
 		return fmt.Errorf("repo structure: stage missing config.yml: %w", ErrBase)
+	}
+	return nil
+}
+
+// ValidateStageAfterUpdate checks the stage after a successful `fdroid update`.
+// Aborts outside happy path: layout, config.yml, valid indexes, all JSON valid.
+func ValidateStageAfterUpdate(stageRoot string) error {
+	if err := ValidateStageLayout(stageRoot); err != nil {
+		return err
 	}
 	repoDir := filepath.Join(stageRoot, "repo")
 	// Need at least one F-Droid index artifact.
