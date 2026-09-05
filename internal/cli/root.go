@@ -111,16 +111,11 @@ func CloseSession() error {
 	return nil
 }
 
-func loadApp(cmd *cobra.Command, args []string) (*app.App, error) {
-	return loadAppDoc(args, false)
+type loadOpts struct {
+	requireDoc bool
 }
 
-// loadAppRequired refuses a missing AuthorityDoc when --config is unset.
-func loadAppRequired(cmd *cobra.Command, args []string) (*app.App, error) {
-	return loadAppDoc(args, true)
-}
-
-func loadAppDoc(args []string, requireDoc bool) (*app.App, error) {
+func loadApp(args []string, opts loadOpts) (*app.App, error) {
 	if len(args) < 1 {
 		return nil, fmt.Errorf("missing REPO path (F-Droid simple-binary root): %w", ErrBase)
 	}
@@ -128,7 +123,7 @@ func loadAppDoc(args []string, requireDoc bool) (*app.App, error) {
 		cfg *config.Config
 		err error
 	)
-	if requireDoc {
+	if opts.requireDoc {
 		cfg, err = config.LoadFromRepoRequired(args[0], cacheFlag, cfgFile)
 	} else {
 		cfg, err = config.LoadFromRepo(args[0], cacheFlag, cfgFile)

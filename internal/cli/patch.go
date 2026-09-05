@@ -21,7 +21,7 @@ func newPatchCmd() *cobra.Command {
 			if err := toolscheck.Check([]toolscheck.Requirement{{Name: "java"}}); err != nil {
 				return err
 			}
-			a, err := loadApp(cmd, args)
+			a, err := loadApp(args, loadOpts{})
 			if err != nil {
 				return err
 			}
