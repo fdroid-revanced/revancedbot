@@ -21,7 +21,7 @@ func newFDroidInitCmd() *cobra.Command {
 			if _, err := config.EnsureRepoDir(args[0]); err != nil {
 				return err
 			}
-			a, err := loadAppRequired(cmd, args)
+			a, err := loadApp(args, loadOpts{requireDoc: true})
 			if err != nil {
 				return err
 			}
@@ -57,7 +57,7 @@ func newFDroidUpdateCmd() *cobra.Command {
 		Short: "fdroid update in CACHE stage then atomically publish to REPO",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			a, err := loadAppRequired(cmd, args)
+			a, err := loadApp(args, loadOpts{requireDoc: true})
 			if err != nil {
 				return err
 			}

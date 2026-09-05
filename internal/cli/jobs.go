@@ -17,7 +17,7 @@ func newListJobsCmd() *cobra.Command {
 		Short: "List packages and preferred versions from cached ReVanced patches",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			a, err := loadApp(cmd, args)
+			a, err := loadApp(args, loadOpts{})
 			if err != nil {
 				return err
 			}
