@@ -1,6 +1,7 @@
 package revanced
 
 import (
+	"errors"
 	"testing"
 )
 
@@ -14,7 +15,10 @@ Package name: com.other.app
 Most common compatible versions:
 Any
 `
-	jobs := ParseListVersions(sample)
+	jobs, err := ParseListVersions(sample)
+	if err != nil {
+		t.Fatal(err)
+	}
 	if len(jobs) != 2 {
 		t.Fatalf("got %d jobs: %+v", len(jobs), jobs)
 	}
@@ -26,5 +30,25 @@ Any
 	}
 	if jobs[1].PackageID != "com.other.app" || len(jobs[1].Versions) != 1 || jobs[1].Versions[0] != "" {
 		t.Fatalf("job1: %+v", jobs[1])
+	}
+}
+
+func TestParseListVersions_emptyOK(t *testing.T) {
+	jobs, err := ParseListVersions("")
+	if err != nil {
+		t.Fatalf("empty stdout: %v", err)
+	}
+	if len(jobs) != 0 {
+		t.Fatalf("got %d jobs: %+v", len(jobs), jobs)
+	}
+}
+
+func TestParseListVersions_unparseable(t *testing.T) {
+	_, err := ParseListVersions("revanced-cli 5.0.0\nUsage: list-versions\n")
+	if err == nil {
+		t.Fatal("expected parse error for non-empty unparseable stdout")
+	}
+	if !errors.Is(err, ErrBase) {
+		t.Fatalf("err = %v; want wrap of ErrBase", err)
 	}
 }
