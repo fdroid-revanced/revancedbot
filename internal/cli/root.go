@@ -33,7 +33,7 @@ func NewRoot() *cobra.Command {
 		Version:       version.Version,
 		PersistentPreRunE: func(cmd *cobra.Command, args []string) error {
 			cfg := optionalConfig(args)
-			if err := installLogLevel(cmd, logLevelOf(cfg)); err != nil {
+			if err := installLogLevel(cmd, cfg.LogLevelOrDefault()); err != nil {
 				return err
 			}
 			sess, ctx := taskgroup.Enter(cmd.Context(), limitsFromConfig(cfg))
@@ -74,13 +74,6 @@ func optionalConfig(args []string) *config.Config {
 		return nil
 	}
 	return cfg
-}
-
-func logLevelOf(cfg *config.Config) string {
-	if cfg == nil {
-		return "info"
-	}
-	return cfg.LogLevel
 }
 
 func installLogLevel(cmd *cobra.Command, name string) error {
@@ -153,7 +146,7 @@ func loadApp(cmd *cobra.Command, args []string) (*app.App, error) {
 		return nil, err
 	}
 	// PersistentPreRunE may have used a default handler; YAML is authoritative.
-	if err := installLogLevel(cmd, cfg.LogLevel); err != nil {
+	if err := installLogLevel(cmd, cfg.LogLevelOrDefault()); err != nil {
 		return nil, err
 	}
 	return app.New(cfg)

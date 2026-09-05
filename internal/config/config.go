@@ -144,6 +144,14 @@ func LoadFromRepo(repo, cacheFlag, cfgFile string) (*Config, error) {
 	return cfg, nil
 }
 
+// LogLevelOrDefault returns AuthorityDoc log_level, or info if c is nil or the field is empty.
+func (c *Config) LogLevelOrDefault() string {
+	if c == nil || strings.TrimSpace(c.LogLevel) == "" {
+		return "info"
+	}
+	return c.LogLevel
+}
+
 // ParseLogLevel maps AuthorityDoc log_level to slog.Level.
 // Empty or whitespace is info. Names match slog: debug, info, warn, error.
 func ParseLogLevel(s string) (slog.Level, error) {
