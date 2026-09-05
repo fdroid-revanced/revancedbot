@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 
+	"github.com/lucasew/revancedbot/internal/osx"
 	"github.com/lucasew/revancedbot/internal/strutil"
 )
 
@@ -31,21 +32,29 @@ type Layout struct {
 
 // New builds a layout. cache may be empty → MkdirTemp.
 func New(repo, cache string) (*Layout, error) {
-	repoAbs, err := filepath.Abs(repo)
+	repoAbs, err := Resolve(repo)
 	if err != nil {
 		return nil, err
 	}
 	var cacheAbs string
+	created := false
 	if cache == "" {
 		cacheAbs, err = os.MkdirTemp("", "revancedbot-cache-*")
 		if err != nil {
 			return nil, fmt.Errorf("mkdtemp cache: %w", err)
 		}
+		created = true
 	} else {
-		cacheAbs, err = filepath.Abs(cache)
+		cacheAbs, err = Resolve(cache)
 		if err != nil {
 			return nil, err
 		}
+	}
+	if Under(repoAbs, cacheAbs) {
+		if created {
+			osx.RemoveAll(cacheAbs)
+		}
+		return nil, fmt.Errorf("cache must not be the repo or inside the repo: cache=%s repo=%s: %w", cacheAbs, repoAbs, ErrBase)
 	}
 	stage := filepath.Join(cacheAbs, "fdroid")
 	l := &Layout{
@@ -54,7 +63,7 @@ func New(repo, cache string) (*Layout, error) {
 		Tools:        filepath.Join(cacheAbs, "tools"),
 		StockAPKs:    filepath.Join(cacheAbs, "stock"),
 		Signing:      filepath.Join(cacheAbs, "signing"),
-		KeystorePath: filepath.Join(cacheAbs, "signing", "keystore.jks"),
+		KeystorePath: KeystoreFile(cacheAbs),
 		Work:         filepath.Join(cacheAbs, "work"),
 		Stage:        stage,
 		Shims:        filepath.Join(cacheAbs, "shims"),

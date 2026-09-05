@@ -9,6 +9,8 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+
+	"github.com/lucasew/revancedbot/internal/workspace"
 )
 
 const blobVersion = 1
@@ -104,8 +106,16 @@ func DecodeBlob(s string) (*Blob, error) {
 	return &b, nil
 }
 
-// Materialize writes the keystore to path and validates with keytool.
-func (b *Blob) Materialize(keystorePath string) error {
+// Materialize writes the keystore only to CACHE/signing/keystore.jks and validates with keytool.
+func (b *Blob) Materialize(cacheDir string) error {
+	if strings.TrimSpace(cacheDir) == "" {
+		return fmt.Errorf("cache dir required to materialize keystore: %w", ErrBase)
+	}
+	cacheAbs, err := workspace.Resolve(cacheDir)
+	if err != nil {
+		return err
+	}
+	keystorePath := workspace.KeystoreFile(cacheAbs)
 	b64, err := b.keystoreBytes()
 	if err != nil {
 		return err

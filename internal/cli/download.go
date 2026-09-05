@@ -37,7 +37,7 @@ func newDownloadCmd() *cobra.Command {
 					fmt.Printf("cache\t%s\n", path)
 					return nil
 				}
-				reg := download.DefaultRegistry()
+				reg := download.DefaultRegistry(a.Cfg.BrowserCDPURL)
 				order := a.Cfg.DownloaderOrder
 				if len(order) == 0 {
 					order = download.DefaultOrder

@@ -39,6 +39,7 @@ const (
 // dispenser). Aptoide covers many Play-mirrored packages without that stack.
 type Aptoide struct {
 	Client *http.Client
+	CDPURL string
 }
 
 func (a *Aptoide) ID() string { return "aptoide" }
@@ -333,9 +334,10 @@ func (a *Aptoide) getJSON(ctx context.Context, cl *http.Client, url string) ([]b
 		return nil, err
 	}
 	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("HTTP %s for %s: %w", resp.Status, url, ErrBase)
-	}
 	const maxJSON = 4 << 20
-	return io.ReadAll(io.LimitReader(resp.Body, maxJSON))
+	body, err := io.ReadAll(io.LimitReader(resp.Body, maxJSON))
+	if err != nil {
+		return nil, err
+	}
+	return (rawHTTP{URL: url, Status: resp.StatusCode, Body: body}).finish(ctx, a.CDPURL)
 }
