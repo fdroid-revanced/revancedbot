@@ -18,33 +18,45 @@ const blobVersion = 1
 type Blob struct {
 	V           int    `json:"v"`
 	KeystoreB64 string `json:"keystore_b64"`
-	// KeystoreP12B64 is legacy field name (still accepted on decode).
+	// KeystoreP12B64 is a legacy field. DecodeBlob rejects any blob that sets it.
 	KeystoreP12B64 string `json:"keystore_p12_b64,omitempty"`
 	StorePass      string `json:"storepass"`
 	KeyPass        string `json:"keypass"`
 	Alias          string `json:"alias"`
-	StoreType      string `json:"storetype,omitempty"` // default JKS
+	StoreType      string `json:"storetype,omitempty"` // empty or JKS
 }
 
 func (b *Blob) keystoreBytes() (string, error) {
 	if b.KeystoreB64 != "" {
 		return b.KeystoreB64, nil
 	}
-	if b.KeystoreP12B64 != "" {
-		return b.KeystoreP12B64, nil
-	}
-	return "", fmt.Errorf("signing blob missing keystore bytes: %w", ErrBase)
+	return "", fmt.Errorf("signing blob missing keystore_b64: %w", ErrBase)
 }
 
 func (b *Blob) storeType() string {
 	if b.StoreType != "" {
 		return b.StoreType
 	}
-	// legacy blobs were PKCS12
-	if b.KeystoreP12B64 != "" && b.KeystoreB64 == "" {
-		return "PKCS12"
-	}
 	return "JKS"
+}
+
+func (b *Blob) validate() error {
+	if b.KeystoreP12B64 != "" {
+		return fmt.Errorf("signing blob keystore_p12_b64 is not supported: %w", ErrPKCS12)
+	}
+	if b.StoreType == "PKCS12" {
+		return fmt.Errorf("signing blob storetype PKCS12 is not supported: %w", ErrPKCS12)
+	}
+	if b.KeystoreB64 == "" {
+		return fmt.Errorf("signing blob missing keystore_b64: %w", ErrBase)
+	}
+	if b.StoreType != "" && b.StoreType != "JKS" {
+		return fmt.Errorf("signing blob storetype must be JKS: %w", ErrBase)
+	}
+	if b.StorePass == "" || b.KeyPass == "" || b.Alias == "" {
+		return fmt.Errorf("signing blob missing required fields: %w", ErrBase)
+	}
+	return nil
 }
 
 // Encode returns a single-line base64(JSON) string for pasting into a secret.
@@ -52,6 +64,9 @@ func (b *Blob) Encode() (string, error) {
 	b.V = blobVersion
 	if b.StoreType == "" {
 		b.StoreType = "JKS"
+	}
+	if err := b.validate(); err != nil {
+		return "", err
 	}
 	raw, err := json.Marshal(b)
 	if err != nil {
@@ -83,11 +98,8 @@ func DecodeBlob(s string) (*Blob, error) {
 	if b.V != blobVersion {
 		return nil, fmt.Errorf("unsupported signing blob version %d (want %d): %w", b.V, blobVersion, ErrBase)
 	}
-	if _, err := b.keystoreBytes(); err != nil {
+	if err := b.validate(); err != nil {
 		return nil, err
-	}
-	if b.StorePass == "" || b.KeyPass == "" || b.Alias == "" {
-		return nil, fmt.Errorf("signing blob missing required fields: %w", ErrBase)
 	}
 	return &b, nil
 }
