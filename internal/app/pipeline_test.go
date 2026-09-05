@@ -2,6 +2,7 @@ package app
 
 import (
 	"bytes"
+	"context"
 	"errors"
 	"fmt"
 	"io/fs"
@@ -13,6 +14,7 @@ import (
 
 	"github.com/lucasew/revancedbot/internal/config"
 	"github.com/lucasew/revancedbot/internal/download"
+	"github.com/lucasew/revancedbot/internal/revanced"
 	"github.com/lucasew/revancedbot/internal/workspace"
 	"github.com/lucasew/workspaced/pkg/logging"
 )
@@ -202,15 +204,6 @@ func TestFetchTools_CacheHitWithoutOverride(t *testing.T) {
 	assertFile(t, a.WS.PatchesRVP(), rvp)
 }
 
-func testApp(t *testing.T) *App {
-	t.Helper()
-	a, err := New(&config.Config{Repo: t.TempDir(), Cache: t.TempDir()})
-	if err != nil {
-		t.Fatal(err)
-	}
-	return a
-}
-
 func writeFat(t *testing.T, path, stamp string) []byte {
 	t.Helper()
 	b := bytes.Repeat([]byte(stamp), 256)
@@ -239,6 +232,8 @@ func clip(b []byte) string {
 		return string(b[:24]) + "…"
 	}
 	return string(b)
+}
+
 func TestStockRegistry_passesBrowserCDPURL(t *testing.T) {
 	t.Parallel()
 	const cdp = "ws://127.0.0.1:3000"
@@ -261,5 +256,95 @@ func TestStockRegistry_emptyCDP(t *testing.T) {
 	reg := a.stockRegistry()
 	if got := reg["aptoide"].(*download.Aptoide).CDPURL; got != "" {
 		t.Fatalf("empty config CDPURL=%q", got)
+	}
+}
+
+func TestRunSmoke_walksSameJobsAsRun(t *testing.T) {
+	jobs := []revanced.Job{
+		{PackageID: "com.google.android.youtube"},
+		{PackageID: "com.google.android.apps.photos"},
+		{PackageID: "com.example.app"},
+	}
+	tried := map[string]int{}
+	ok, err := runSmoke(testSession(t), smokeRun{
+		jobs:  append([]revanced.Job(nil), jobs...),
+		maxOK: len(jobs),
+		try: func(_ context.Context, job revanced.Job) error {
+			tried[job.PackageID]++
+			return nil
+		},
+		update:  func(context.Context) error { return nil },
+		publish: func() error { return nil },
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if ok != len(jobs) {
+		t.Fatalf("ok=%d want %d", ok, len(jobs))
+	}
+	for _, job := range jobs {
+		if tried[job.PackageID] != 1 {
+			t.Fatalf("job %s tries=%d want 1 (tried=%v)", job.PackageID, tried[job.PackageID], tried)
+		}
+	}
+}
+
+func TestRunSmoke_stopsAtMax(t *testing.T) {
+	var n int
+	ok, err := runSmoke(testSession(t), smokeRun{
+		jobs: []revanced.Job{
+			{PackageID: "com.google.android.youtube"},
+			{PackageID: "com.example.app"},
+			{PackageID: "com.other.app"},
+		},
+		maxOK: 1,
+		try: func(_ context.Context, _ revanced.Job) error {
+			n++
+			return nil
+		},
+		update:  func(context.Context) error { return nil },
+		publish: func() error { return nil },
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if ok != 1 || n != 1 {
+		t.Fatalf("ok=%d tries=%d want 1, 1", ok, n)
+	}
+}
+
+func TestRunSmoke_zeroSuccessDoesNotPublish(t *testing.T) {
+	var updated, published bool
+	tried := map[string]int{}
+	ok, err := runSmoke(testSession(t), smokeRun{
+		jobs: []revanced.Job{
+			{PackageID: "com.google.android.youtube"},
+			{PackageID: "com.google.android.apps.photos"},
+		},
+		maxOK: 1,
+		try: func(_ context.Context, job revanced.Job) error {
+			tried[job.PackageID]++
+			return fmt.Errorf("skip: %w", ErrBase)
+		},
+		update: func(context.Context) error {
+			updated = true
+			return nil
+		},
+		publish: func() error {
+			published = true
+			return nil
+		},
+	})
+	if ok != 0 {
+		t.Fatalf("ok=%d want 0", ok)
+	}
+	if err == nil || !errors.Is(err, ErrBase) {
+		t.Fatalf("err=%v want wrap of ErrBase", err)
+	}
+	if updated || published {
+		t.Fatalf("updated=%v published=%v want neither", updated, published)
+	}
+	if tried["com.google.android.youtube"] != 1 || tried["com.google.android.apps.photos"] != 1 {
+		t.Fatalf("tried=%v want youtube and photos once each", tried)
 	}
 }
