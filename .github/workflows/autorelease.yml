@@ -1,0 +1,59 @@
+name: Autorelease
+
+on:
+  push:
+    branches:
+      - main
+    # Do not trigger on tags: mise release mints a tag, which would re-enter
+    # this workflow and publish twice.
+  pull_request:
+    branches:
+      - main
+  workflow_dispatch:
+    inputs:
+      new_version:
+        description: 'New tag version'
+        type: choice
+        default: 'next'
+        options:
+          - next
+          - patch
+          - minor
+          - major
+
+jobs:
+  autorelease:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
+        with:
+          fetch-depth: 0
+          fetch-tags: true
+
+      - name: Setup git config
+        run: |
+          git config user.name actions-bot
+          git config user.email actions-bot@users.noreply.github.com
+
+      - uses: jdx/mise-action@6d1e696aa24c1aa1bcc1adea0212707c71ab78a8 # v3
+
+      - name: Validate GoReleaser config
+        run: mise run release:check
+
+      - name: Snapshot build (PR / main)
+        if: github.event_name == 'pull_request' || (github.event_name == 'push' && github.ref == 'refs/heads/main')
+        run: goreleaser build --snapshot --clean
+
+      - name: Make release if everything looks right
+        if: github.event_name == 'workflow_dispatch'
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          NEW_VERSION: ${{ github.event.inputs.new_version }}
+        run: |
+          set -euo pipefail
+          echo "Existing tags (top):"
+          git tag --sort=-v:refname | head -10 || true
+          echo "svu current=$(svu current 2>/dev/null || true) next=$(svu next) minor=$(svu minor) patch=$(svu patch)"
+          mise run release -- "${NEW_VERSION:-next}"
