@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"io/fs"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"strings"
@@ -160,6 +161,28 @@ func LoadFromRepo(repo, cacheFlag, cfgFile string) (*Config, error) {
 	cfg.SigningBlob = firstNonEmpty(os.Getenv("REVANCEDBOT_SIGNING"), os.Getenv("REVANCEDBOT_SIGNING_BLOB"))
 	cfg.GitHubToken = firstNonEmpty(os.Getenv("GITHUB_TOKEN"), os.Getenv("REVANCEDBOT_GITHUB_TOKEN"))
 	return cfg, nil
+}
+
+// LogLevelOrDefault returns AuthorityDoc log_level, or info if c is nil or the field is empty.
+func (c *Config) LogLevelOrDefault() string {
+	if c == nil || strings.TrimSpace(c.LogLevel) == "" {
+		return "info"
+	}
+	return c.LogLevel
+}
+
+// ParseLogLevel maps AuthorityDoc log_level to slog.Level.
+// Empty or whitespace is info. Names match slog: debug, info, warn, error.
+func ParseLogLevel(s string) (slog.Level, error) {
+	s = strings.TrimSpace(s)
+	if s == "" {
+		return slog.LevelInfo, nil
+	}
+	var level slog.Level
+	if err := level.UnmarshalText([]byte(s)); err != nil {
+		return 0, fmt.Errorf("log_level %q: %w", s, err)
+	}
+	return level, nil
 }
 
 func firstNonEmpty(ss ...string) string {

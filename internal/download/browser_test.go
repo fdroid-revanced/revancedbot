@@ -231,7 +231,7 @@ func TestAptoide_Fetch_forbiddenDeadCDP(t *testing.T) {
 	}
 }
 
-func TestAPKPure_listAPKURL_forbiddenWithoutCDP(t *testing.T) {
+func TestAPKPure_listAPKURLs_forbiddenWithoutCDP(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusForbidden)
 	}))
@@ -241,7 +241,7 @@ func TestAPKPure_listAPKURL_forbiddenWithoutCDP(t *testing.T) {
 	t.Cleanup(func() { apkpureListURL = prevList })
 
 	cl := srv.Client()
-	_, err := (&APKPure{Client: cl}).listAPKURL(t.Context(), cl, "com.example.app", "")
+	_, err := (&APKPure{Client: cl}).listAPKURLs(t.Context(), cl, "com.example.app", "")
 	if !errors.Is(err, ErrNeedBrowser) {
 		t.Fatalf("got %v", err)
 	}

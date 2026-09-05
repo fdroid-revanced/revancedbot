@@ -32,11 +32,11 @@ func NewRoot() *cobra.Command {
 		SilenceErrors: true,
 		Version:       version.Version,
 		PersistentPreRunE: func(cmd *cobra.Command, args []string) error {
-			h := logging.NewPlainHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelInfo})
-			ctx := logging.NewRootContext(slog.New(h))
-			// Keep slog.Default in sync so any leftover stdlib slog calls match.
-			slog.SetDefault(slog.New(h))
-			sess, ctx := taskgroup.Enter(ctx, limitsFromArgs(args))
+			cfg := optionalConfig(args)
+			if err := installLogLevel(cmd, cfg.LogLevelOrDefault()); err != nil {
+				return err
+			}
+			sess, ctx := taskgroup.Enter(cmd.Context(), limitsFromConfig(cfg))
 			sessionMu.Lock()
 			session = sess
 			sessionMu.Unlock()
@@ -65,7 +65,37 @@ func NewRoot() *cobra.Command {
 	return root
 }
 
-// limitsFromArgs returns workspaced DefaultLimits with a tighter Internet cap,
+func optionalConfig(args []string) *config.Config {
+	if len(args) < 1 {
+		return nil
+	}
+	cfg, err := config.LoadFromRepo(args[0], cacheFlag, cfgFile)
+	if err != nil {
+		return nil
+	}
+	return cfg
+}
+
+func installLogLevel(cmd *cobra.Command, name string) error {
+	level, err := config.ParseLogLevel(name)
+	if err != nil {
+		return err
+	}
+	h := logging.NewPlainHandler(os.Stderr, &slog.HandlerOptions{Level: level})
+	logger := slog.New(h)
+	// Keep slog.Default in sync so any leftover stdlib slog calls match.
+	slog.SetDefault(logger)
+	ctx := cmd.Context()
+	if ctx == nil {
+		ctx = logging.NewRootContext(logger)
+	} else {
+		ctx = logging.ContextWithLogger(ctx, logger)
+	}
+	cmd.SetContext(ctx)
+	return nil
+}
+
+// limitsFromConfig returns workspaced DefaultLimits with a tighter Internet cap,
 // optionally overridden by pool_* in REPO/revancedbot.yaml when present.
 //
 // Map pool trick: child tasks use PoolKind; Control is unlimited, Internet/IO/CPU
@@ -74,15 +104,11 @@ func NewRoot() *cobra.Command {
 // Internet limit is what caps concurrent APK downloads/scrapes (not the Map).
 // Do not put packages Map on Internet while downloads also take Internet or
 // you can deadlock (parent holds a slot, child HTTP wants another).
-func limitsFromArgs(args []string) taskgroup.Limits {
+func limitsFromConfig(cfg *config.Config) taskgroup.Limits {
 	limits := taskgroup.DefaultLimits()
 	// Prefer fewer parallel store scrapes (403/429). workspaced default is 4.
 	limits.Internet = 2
-	if len(args) < 1 {
-		return limits
-	}
-	cfg, err := config.LoadFromRepo(args[0], cacheFlag, cfgFile)
-	if err != nil {
+	if cfg == nil {
 		return limits
 	}
 	if cfg.PoolIO > 0 {
@@ -129,6 +155,10 @@ func loadApp(args []string, opts loadOpts) (*app.App, error) {
 		cfg, err = config.LoadFromRepo(args[0], cacheFlag, cfgFile)
 	}
 	if err != nil {
+		return nil, err
+	}
+	// PersistentPreRunE may have used a default handler; YAML is authoritative.
+	if err := installLogLevel(cmd, cfg.LogLevelOrDefault()); err != nil {
 		return nil, err
 	}
 	return app.New(cfg)
