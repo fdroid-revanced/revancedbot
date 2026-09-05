@@ -1,14 +1,19 @@
 package app
 
 import (
+	"bytes"
 	"errors"
 	"fmt"
 	"io/fs"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"testing"
 
+	"github.com/lucasew/revancedbot/internal/config"
 	"github.com/lucasew/revancedbot/internal/workspace"
+	"github.com/lucasew/workspaced/pkg/logging"
 )
 
 func TestRequirePatchedPackageID(t *testing.T) {
@@ -142,4 +147,95 @@ func TestStagePatched_metadataFailRemovesAPK(t *testing.T) {
 	if _, err := os.Stat(filepath.Join(stage, "repo", "com.example.app_1.0_revanced.apk")); !errors.Is(err, fs.ErrNotExist) {
 		t.Fatalf("staged apk should be removed: %v", err)
 	}
+}
+
+func TestFetchTools_PatchesFileOverridesCacheHit(t *testing.T) {
+	a := testApp(t)
+	oldCLI := writeFat(t, a.WS.PatcherJAR(), "cli-old")
+	writeFat(t, a.WS.PatchesRVP(), "rvp-old")
+	src := filepath.Join(t.TempDir(), "override.rvp")
+	want := writeFat(t, src, "rvp-new")
+	t.Setenv("REVANCEDBOT_PATCHES_FILE", src)
+	t.Setenv("REVANCEDBOT_PATCHES_URL", "")
+
+	if err := a.FetchTools(logging.NewWriterContext(t.Output())); err != nil {
+		t.Fatalf("FetchTools: %v", err)
+	}
+	assertFile(t, a.WS.PatchesRVP(), want)
+	assertFile(t, a.WS.PatcherJAR(), oldCLI)
+}
+
+func TestFetchTools_PatchesURLOverridesCacheHit(t *testing.T) {
+	a := testApp(t)
+	oldCLI := writeFat(t, a.WS.PatcherJAR(), "cli-old")
+	writeFat(t, a.WS.PatchesRVP(), "rvp-old")
+	want := bytes.Repeat([]byte("rvp-url"), 256)
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		if _, err := w.Write(want); err != nil {
+			t.Errorf("write override body: %v", err)
+		}
+	}))
+	t.Cleanup(srv.Close)
+	t.Setenv("REVANCEDBOT_PATCHES_FILE", "")
+	t.Setenv("REVANCEDBOT_PATCHES_URL", srv.URL+"/patches.rvp")
+
+	if err := a.FetchTools(logging.NewWriterContext(t.Output())); err != nil {
+		t.Fatalf("FetchTools: %v", err)
+	}
+	assertFile(t, a.WS.PatchesRVP(), want)
+	assertFile(t, a.WS.PatcherJAR(), oldCLI)
+}
+
+func TestFetchTools_CacheHitWithoutOverride(t *testing.T) {
+	a := testApp(t)
+	cli := writeFat(t, a.WS.PatcherJAR(), "cli-hit")
+	rvp := writeFat(t, a.WS.PatchesRVP(), "rvp-hit")
+	t.Setenv("REVANCEDBOT_PATCHES_FILE", "")
+	t.Setenv("REVANCEDBOT_PATCHES_URL", "")
+
+	if err := a.FetchTools(logging.NewWriterContext(t.Output())); err != nil {
+		t.Fatalf("FetchTools: %v", err)
+	}
+	assertFile(t, a.WS.PatcherJAR(), cli)
+	assertFile(t, a.WS.PatchesRVP(), rvp)
+}
+
+func testApp(t *testing.T) *App {
+	t.Helper()
+	a, err := New(&config.Config{Repo: t.TempDir(), Cache: t.TempDir()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return a
+}
+
+func writeFat(t *testing.T, path, stamp string) []byte {
+	t.Helper()
+	b := bytes.Repeat([]byte(stamp), 256)
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, b, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	return b
+}
+
+func assertFile(t *testing.T, path string, want []byte) {
+	t.Helper()
+	got, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(got, want) {
+		t.Fatalf("%s: got %q want %q", path, clip(got), clip(want))
+	}
+}
+
+func clip(b []byte) string {
+	if len(b) > 24 {
+		return string(b[:24]) + "…"
+	}
+	return string(b)
 }

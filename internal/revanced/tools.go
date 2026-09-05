@@ -46,6 +46,13 @@ func FetchCLI(ctx context.Context, token, cliJarPath string) error {
 	return nil
 }
 
+// PatchesOverride reports whether the operator pinned patches via
+// REVANCEDBOT_PATCHES_FILE or REVANCEDBOT_PATCHES_URL.
+func PatchesOverride() bool {
+	return strings.TrimSpace(os.Getenv("REVANCEDBOT_PATCHES_FILE")) != "" ||
+		strings.TrimSpace(os.Getenv("REVANCEDBOT_PATCHES_URL")) != ""
+}
+
 // FetchPatches downloads the latest patches .rvp.
 //
 // Order:
@@ -158,14 +165,10 @@ func fetchPatchesGitHub(ctx context.Context, token, tag, dest string) error {
 			owner, repo = o, r
 		}
 	}
-	client := githubClient(ctx, token)
+	client := newGitHubClient(ctx, token)
 	rel, _, err := client.Repositories.GetReleaseByTag(ctx, owner, repo, tag)
 	if err != nil {
-		// try latest if tag-specific fails
-		rel, _, err = client.Repositories.GetLatestRelease(ctx, owner, repo)
-		if err != nil {
-			return err
-		}
+		return err
 	}
 	ver := strings.TrimPrefix(rel.GetTagName(), "v")
 	match := func(name string) bool {
@@ -203,6 +206,9 @@ func githubClient(ctx context.Context, token string) *github.Client {
 	ts := oauth2.StaticTokenSource(&oauth2.Token{AccessToken: token})
 	return github.NewClient(oauth2.NewClient(ctx, ts))
 }
+
+// newGitHubClient is githubClient; tests swap it to point at httptest.
+var newGitHubClient = githubClient
 
 func downloadLatestGitHubAsset(ctx context.Context, client *github.Client, owner, repo string, match func(string) bool, dest string) error {
 	rel, _, err := client.Repositories.GetLatestRelease(ctx, owner, repo)
