@@ -90,8 +90,57 @@ func SanitizeJSONTree(root string) (int, error) {
 	return n, err
 }
 
-// RemovePublishLeftovers deletes .repo.new / .repo.old style dirs under live root.
+// RemovePublishLeftovers restores a crashed swap, then deletes leftover .*.new / .*.old.
+// A leftover .repo.old with no repo/ is renamed back before cleanup (same for metadata).
 func RemovePublishLeftovers(root string) error {
+	if err := restorePublishLeftovers(root); err != nil {
+		return err
+	}
+	return deletePublishLeftovers(root)
+}
+
+func restorePublishLeftovers(root string) error {
+	incomplete := publishUnitIncomplete(root)
+	for _, name := range livePublishNames {
+		live := filepath.Join(root, name)
+		old := filepath.Join(root, "."+name+".old")
+		if !pathExists(old) {
+			continue
+		}
+		if pathExists(live) && !incomplete {
+			continue
+		}
+		if pathExists(live) {
+			if err := os.RemoveAll(live); err != nil {
+				return err
+			}
+		}
+		if err := os.Rename(old, live); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func publishUnitIncomplete(root string) bool {
+	var anyOld, anyNew, missingWithOld bool
+	for _, name := range livePublishNames {
+		live := filepath.Join(root, name)
+		old := filepath.Join(root, "."+name+".old")
+		if pathExists(old) {
+			anyOld = true
+			if !pathExists(live) {
+				missingWithOld = true
+			}
+		}
+		if pathExists(filepath.Join(root, "."+name+".new")) {
+			anyNew = true
+		}
+	}
+	return missingWithOld || (anyOld && anyNew)
+}
+
+func deletePublishLeftovers(root string) error {
 	entries, err := os.ReadDir(root)
 	if err != nil {
 		if errors.Is(err, fs.ErrNotExist) {
@@ -100,17 +149,23 @@ func RemovePublishLeftovers(root string) error {
 		return err
 	}
 	for _, e := range entries {
-		if !e.IsDir() {
+		name := e.Name()
+		if !strings.HasPrefix(name, ".") {
 			continue
 		}
-		name := e.Name()
-		if strings.HasPrefix(name, ".") && (strings.HasSuffix(name, ".new") || strings.HasSuffix(name, ".old")) {
-			if err := os.RemoveAll(filepath.Join(root, name)); err != nil {
-				return err
-			}
+		if !strings.HasSuffix(name, ".new") && !strings.HasSuffix(name, ".old") {
+			continue
+		}
+		if err := os.RemoveAll(filepath.Join(root, name)); err != nil {
+			return err
 		}
 	}
 	return nil
+}
+
+func pathExists(p string) bool {
+	_, err := os.Stat(p)
+	return err == nil
 }
 
 // ValidateStageLayout checks config.yml + repo/ + metadata/. Indexes are not required.
