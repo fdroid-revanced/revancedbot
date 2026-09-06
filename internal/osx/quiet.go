@@ -17,10 +17,3 @@ func RemoveAll(path string) {
 		return
 	}
 }
-
-// Rename is best-effort os.Rename (rollback paths in atomic publish).
-func Rename(oldpath, newpath string) {
-	if err := os.Rename(oldpath, newpath); err != nil {
-		return
-	}
-}
