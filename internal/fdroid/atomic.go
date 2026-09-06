@@ -16,18 +16,17 @@ import (
 // livePublishNames is the Repo triple published as one unit (INV-01).
 var livePublishNames = []string{"config.yml", "repo", "metadata"}
 
-// WriteFileAtomic writes data to path via lewkit WriteFileFunction.
+// WriteFileAtomic writes data and mode on the staging file inside WriteFileFunction.
 func WriteFileAtomic(path string, data []byte, perm os.FileMode) error {
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		return err
 	}
-	if err := ioatomic.WriteFileFunction(path, func(w io.Writer) error {
-		_, err := w.Write(data)
-		return err
-	}); err != nil {
-		return err
-	}
-	return os.Chmod(path, perm)
+	return ioatomic.WriteFileFunction(path, func(w io.Writer) error {
+		if _, err := w.Write(data); err != nil {
+			return err
+		}
+		return chmodWriter(w, perm)
+	})
 }
 
 // PublishArgs is the stage→live publish. LayoutOnly skips the index-artifact gate (fdroid-init).
@@ -168,11 +167,18 @@ func copyFile(src, dst string, perm os.FileMode) error {
 	if err := os.MkdirAll(filepath.Dir(dst), 0o755); err != nil {
 		return err
 	}
-	if err := ioatomic.WriteFileFunction(dst, func(w io.Writer) error {
-		_, err := io.Copy(w, in)
-		return err
-	}); err != nil {
-		return err
+	return ioatomic.WriteFileFunction(dst, func(w io.Writer) error {
+		if _, err := io.Copy(w, in); err != nil {
+			return err
+		}
+		return chmodWriter(w, perm)
+	})
+}
+
+func chmodWriter(w io.Writer, perm os.FileMode) error {
+	f, ok := w.(*os.File)
+	if !ok {
+		return fmt.Errorf("atomic write: writer is not *os.File: %w", ErrBase)
 	}
-	return os.Chmod(dst, perm)
+	return f.Chmod(perm)
 }
