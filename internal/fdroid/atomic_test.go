@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+	"uuid"
 )
 
 func TestWriteFileAtomic(t *testing.T) {
@@ -136,104 +137,28 @@ func TestPublishRequiresIndex(t *testing.T) {
 	}
 }
 
-func TestRemovePublishLeftoversRestoresRepo(t *testing.T) {
+func TestRemovePublishLeftoversDeletesTemps(t *testing.T) {
 	live := t.TempDir()
-	old := filepath.Join(live, ".repo.old")
-	if err := os.MkdirAll(old, 0o755); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(filepath.Join(old, "index-v1.json"), []byte(`{"apps":[]}`), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.MkdirAll(filepath.Join(live, "metadata"), 0o755); err != nil {
-		t.Fatal(err)
-	}
-	if err := RemovePublishLeftovers(live); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := os.Stat(filepath.Join(live, "repo", "index-v1.json")); err != nil {
-		t.Fatalf("repo should be restored from .repo.old: %v", err)
-	}
-	if _, err := os.Stat(old); !errors.Is(err, fs.ErrNotExist) {
-		t.Fatal(".repo.old should be removed after restore")
-	}
-}
-
-func TestRemovePublishLeftoversRestoresMetadata(t *testing.T) {
-	live := t.TempDir()
-	old := filepath.Join(live, ".metadata.old")
-	if err := os.MkdirAll(old, 0o755); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(filepath.Join(old, "pkg.yml"), []byte("x: 1\n"), 0o644); err != nil {
-		t.Fatal(err)
-	}
 	if err := os.MkdirAll(filepath.Join(live, "repo"), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	if err := RemovePublishLeftovers(live); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := os.Stat(filepath.Join(live, "metadata", "pkg.yml")); err != nil {
-		t.Fatalf("metadata should be restored from .metadata.old: %v", err)
-	}
-	if _, err := os.Stat(old); !errors.Is(err, fs.ErrNotExist) {
-		t.Fatal(".metadata.old should be removed after restore")
-	}
-}
-
-func TestRemovePublishLeftoversRollsBackPartialUnit(t *testing.T) {
-	live := t.TempDir()
-	if err := os.WriteFile(filepath.Join(live, "config.yml"), []byte("new\n"), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(filepath.Join(live, ".config.yml.old"), []byte("old\n"), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.MkdirAll(filepath.Join(live, "repo"), 0o755); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(filepath.Join(live, "repo", "new.apk"), []byte("new"), 0o644); err != nil {
+	tmp := filepath.Join(live, "repo."+uuid.NewV7().String())
+	if err := os.MkdirAll(tmp, 0o755); err != nil {
 		t.Fatal(err)
 	}
 	if err := os.MkdirAll(filepath.Join(live, ".repo.old"), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(live, ".repo.old", "old.apk"), []byte("old"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.MkdirAll(filepath.Join(live, "metadata"), 0o755); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(filepath.Join(live, "metadata", "old.yml"), []byte("old\n"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.MkdirAll(filepath.Join(live, ".metadata.new"), 0o755); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(filepath.Join(live, ".metadata.new", "new.yml"), []byte("new\n"), 0o644); err != nil {
-		t.Fatal(err)
-	}
 	if err := RemovePublishLeftovers(live); err != nil {
 		t.Fatal(err)
 	}
-	b, err := os.ReadFile(filepath.Join(live, "config.yml"))
-	if err != nil || string(b) != "old\n" {
-		t.Fatalf("config.yml = %q err %v; want previous publish", b, err)
-	}
-	if _, err := os.Stat(filepath.Join(live, "repo", "old.apk")); err != nil {
-		t.Fatalf("repo should roll back to .repo.old: %v", err)
-	}
-	if _, err := os.Stat(filepath.Join(live, "repo", "new.apk")); err == nil {
-		t.Fatal("partial new repo must not stay after unit rollback")
-	}
-	if _, err := os.Stat(filepath.Join(live, "metadata", "old.yml")); err != nil {
+	if _, err := os.Stat(filepath.Join(live, "repo")); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := os.Stat(filepath.Join(live, ".metadata.new")); !errors.Is(err, fs.ErrNotExist) {
-		t.Fatal(".metadata.new should be deleted")
+	if _, err := os.Stat(tmp); !errors.Is(err, fs.ErrNotExist) {
+		t.Fatal("lewkit leftover should be deleted")
 	}
 	if _, err := os.Stat(filepath.Join(live, ".repo.old")); !errors.Is(err, fs.ErrNotExist) {
-		t.Fatal(".repo.old should be deleted after restore")
+		t.Fatal(".repo.old should be deleted")
 	}
 }

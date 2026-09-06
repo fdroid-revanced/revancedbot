@@ -90,64 +90,9 @@ func SanitizeJSONTree(root string) (int, error) {
 	return n, err
 }
 
-// RemovePublishLeftovers restores a crashed swap, then deletes leftover .*.new / .*.old.
-// A leftover .repo.old with no repo/ is renamed back before cleanup (same for metadata).
+// RemovePublishLeftovers deletes leftover publish temps (lewkit path.<uuid>
+// and leftover .*.old / .*.new from older deploys).
 func RemovePublishLeftovers(root string) error {
-	if err := restorePublishLeftovers(root); err != nil {
-		return err
-	}
-	return deletePublishLeftovers(root)
-}
-
-func restorePublishLeftovers(root string) error {
-	incomplete := publishUnitIncomplete(root)
-	for _, name := range livePublishNames {
-		live := filepath.Join(root, name)
-		old := filepath.Join(root, "."+name+".old")
-		if !pathExists(old) {
-			continue
-		}
-		if pathExists(live) && !incomplete {
-			continue
-		}
-		if pathExists(live) {
-			if err := os.RemoveAll(live); err != nil {
-				return err
-			}
-		}
-		if err := os.Rename(old, live); err != nil {
-			return err
-		}
-	}
-	return nil
-}
-
-func publishUnitIncomplete(root string) bool {
-	var anyOld, anyNew, missingWithOld bool
-	for _, name := range livePublishNames {
-		live := filepath.Join(root, name)
-		old := filepath.Join(root, "."+name+".old")
-		if pathExists(old) {
-			anyOld = true
-			if !pathExists(live) {
-				missingWithOld = true
-			}
-		}
-		if pathExists(filepath.Join(root, "."+name+".new")) {
-			anyNew = true
-		}
-	}
-	if entries, err := os.ReadDir(root); err == nil {
-		for _, e := range entries {
-			if isPublishTempName(e.Name()) && !strings.HasSuffix(e.Name(), ".old") {
-				anyNew = true
-			}
-		}
-	}
-	return missingWithOld || (anyOld && anyNew)
-}
-
-func deletePublishLeftovers(root string) error {
 	entries, err := os.ReadDir(root)
 	if err != nil {
 		if errors.Is(err, fs.ErrNotExist) {
@@ -165,11 +110,6 @@ func deletePublishLeftovers(root string) error {
 		}
 	}
 	return nil
-}
-
-func pathExists(p string) bool {
-	_, err := os.Stat(p)
-	return err == nil
 }
 
 // ValidateStageLayout checks config.yml + repo/ + metadata/. Indexes are not required.
