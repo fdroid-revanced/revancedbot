@@ -9,7 +9,7 @@ require (
 	github.com/lucasew/workspaced v0.0.0-20260814184647-266ea15ae3d7
 	github.com/spf13/cobra v1.10.2
 	github.com/spf13/viper v1.21.0
-	golang.org/x/oauth2 v0.30.0
+	golang.org/x/oauth2 v0.37.0
 )
 
 require (
