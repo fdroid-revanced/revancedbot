@@ -5,6 +5,7 @@ go 1.27.1
 require (
 	github.com/go-rod/rod v0.116.2
 	github.com/google/go-github/v69 v69.2.0
+	github.com/google/go-github/v82 v82.0.0
 	github.com/lewtec/lewkit v0.0.0-20260903000910-52886154b6dd
 	github.com/lucasew/workspaced v0.0.0-20260814184647-266ea15ae3d7
 	github.com/spf13/cobra v1.10.2
@@ -25,7 +26,7 @@ require (
 	github.com/fetchurl/fetchurl v0.0.0-20260714002336-2d69880d6c8b // indirect
 	github.com/fsnotify/fsnotify v1.9.0 // indirect
 	github.com/go-viper/mapstructure/v2 v2.4.0 // indirect
-	github.com/google/go-querystring v1.1.0 // indirect
+	github.com/google/go-querystring v1.2.0 // indirect
 	github.com/google/uuid v1.6.0 // indirect
 	github.com/inconshreveable/mousetrap v1.1.0 // indirect
 	github.com/lucasb-eyer/go-colorful v1.4.0 // indirect
