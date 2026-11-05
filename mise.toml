@@ -3,7 +3,7 @@
 go = "1.27.1"
 java = "temurin-21.0.7+6.0.LTS"
 goreleaser = "2.17.0"
-svu = "3.3.0"
+svu = "3.4.4"
 "pipx:fdroidserver" = "2.4.5"
 
 [tasks.build]
