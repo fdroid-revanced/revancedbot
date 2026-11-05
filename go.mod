@@ -5,6 +5,7 @@ go 1.27.1
 require (
 	github.com/go-rod/rod v0.116.2
 	github.com/google/go-github/v69 v69.2.0
+	github.com/google/go-github/v77 v77.0.0
 	github.com/lewtec/lewkit v0.0.0-20260903000910-52886154b6dd
 	github.com/lucasew/workspaced v0.0.0-20260814184647-266ea15ae3d7
 	github.com/spf13/cobra v1.10.2
