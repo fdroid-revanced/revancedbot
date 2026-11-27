@@ -6,7 +6,7 @@ require (
 	github.com/go-rod/rod v0.116.2
 	github.com/google/go-github/v69 v69.2.0
 	github.com/lewtec/lewkit v0.0.0-20261124190124-d44587ca3404
-	github.com/lucasew/workspaced v0.0.0-20260814184647-266ea15ae3d7
+	github.com/lucasew/workspaced v0.0.0-20261126183821-e801b625a606
 	github.com/spf13/cobra v1.10.2
 	github.com/spf13/viper v1.21.0
 	golang.org/x/oauth2 v0.36.0
