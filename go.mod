@@ -5,7 +5,7 @@ go 1.27.1
 require (
 	github.com/go-rod/rod v0.116.2
 	github.com/google/go-github/v69 v69.2.0
-	github.com/lewtec/lewkit v0.0.0-20261124190124-d44587ca3404
+	github.com/lewtec/lewkit v0.0.0-20261126183604-afe0a0bb5b5b
 	github.com/lucasew/workspaced v0.0.0-20260814184647-266ea15ae3d7
 	github.com/spf13/cobra v1.10.2
 	github.com/spf13/viper v1.21.0
@@ -22,7 +22,7 @@ require (
 	github.com/charmbracelet/x/windows v0.2.2 // indirect
 	github.com/clipperhouse/displaywidth v0.11.0 // indirect
 	github.com/clipperhouse/uax29/v2 v2.7.0 // indirect
-	github.com/fetchurl/fetchurl v0.0.0-20260714002336-2d69880d6c8b // indirect
+	github.com/fetchurl/fetchurl v0.0.0-20261118141047-28c2ace880da // indirect
 	github.com/fsnotify/fsnotify v1.9.0 // indirect
 	github.com/go-viper/mapstructure/v2 v2.4.0 // indirect
 	github.com/google/go-querystring v1.1.0 // indirect
